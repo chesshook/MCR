@@ -34,6 +34,6 @@ subprocess.run([
     "--nli-limit", "200000",
     "--epochs", "2",
     "--batch-size", "32",
-    "--max-bytes", "384",
+    "--max-bytes", "512",
     "--resume",
 ], cwd=ROOT, check=True, env=os.environ.copy())
