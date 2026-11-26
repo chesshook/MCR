@@ -90,6 +90,14 @@ class TrainingScheduleTests(unittest.TestCase):
     def test_schedule_is_reproducible(self):
         self.assertEqual(make_task_schedule(5, 9, 17), make_task_schedule(5, 9, 17))
 
+class LauncherPathTests(unittest.TestCase):
+    def test_kaggle_launcher_points_to_the_packaged_trainer(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        self.assertTrue((root / "mcr" / "train.py").is_file())
+        launcher = (root / "launch_kaggle.py").read_text(encoding="utf-8")
+        self.assertIn('str(root / "mcr" / "train.py")', launcher)
+
 
 if __name__ == "__main__":
     unittest.main()
