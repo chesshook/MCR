@@ -196,6 +196,24 @@ def main():
         processing_class=tokenizer,
     )
 
+    # Do not claim dual-GPU training unless Accelerate/Trainer actually created
+    # the two-rank NCCL process group launched by torchrun.
+    if not torch.distributed.is_initialized():
+        raise RuntimeError("Distributed process group was not initialized; refusing single-GPU fallback.")
+    if torch.distributed.get_world_size() != 2:
+        raise RuntimeError(
+            f"Expected two synchronized workers, got world_size={torch.distributed.get_world_size()}."
+        )
+    backend = str(torch.distributed.get_backend()).lower()
+    if backend != "nccl":
+        raise RuntimeError(f"Expected NCCL gradient synchronization, got backend={backend!r}.")
+    if torch.cuda.current_device() != local_rank:
+        raise RuntimeError(
+            f"Worker local_rank={local_rank} is bound to cuda:{torch.cuda.current_device()}."
+        )
+    if rank == 0:
+        print("Verified: WORLD_SIZE=2, backend=NCCL, one worker bound to each T4.", flush=True)
+
     checkpoint = get_last_checkpoint(str(output_dir)) if args.resume and output_dir.exists() else None
     if rank == 0:
         print(f"Training examples: {len(data['train']):,}; validation: {len(data['validation']):,}", flush=True)
