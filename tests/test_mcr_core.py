@@ -96,7 +96,7 @@ class LauncherPathTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         self.assertTrue((root / "mcr" / "train.py").is_file())
         launcher = (root / "launch_kaggle.py").read_text(encoding="utf-8")
-        self.assertIn('str(root / "mcr" / "train.py")', launcher)
+        self.assertIn('"--module", "mcr.train"', launcher)
 
 
 if __name__ == "__main__":
