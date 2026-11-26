@@ -1,3 +1,2 @@
-"""MCR conversational model training and inference utilities."""
-
-__version__ = "2.0.0"
+"""MCR mathematical-native conversational understanding system."""
+__version__ = "1.0.0"

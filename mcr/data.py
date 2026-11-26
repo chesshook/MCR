@@ -1,47 +1,32 @@
-"""Build a reproducible, quality-checked English conversation mixture for MCR."""
+"""Download and normalize conversation + natural-language-inference training data.
+
+This module downloads datasets only. It never downloads model weights or tokenizers.
+"""
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any
+from pathlib import Path
+from typing import Any, Iterable
 import json
 import random
-from pathlib import Path
 
-MODEL_ID = "HuggingFaceTB/SmolLM3-3B"
-DATASET_SOURCES = {
-    "smol_smoltalk": {
-        "repo": "HuggingFaceTB/smol-smoltalk",
-        "split": "train",
-        "declared_license": "Apache-2.0 (dataset card; inspect upstream component terms)",
-        "sample_cap": 50_000,
-        "role": "synthetic conversational/instruction examples",
-    },
-    "ultrachat": {
-        "repo": "HuggingFaceH4/ultrachat_200k",
-        "split": "train_sft",
-        "declared_license": "MIT",
-        "sample_cap": 25_000,
-        "role": "synthetic assistant conversations",
-    },
-    "oasst1": {
-        "repo": "OpenAssistant/oasst1",
-        "split": "train",
-        "declared_license": "Apache-2.0",
-        "sample_cap": 10_000,
-        "role": "human-generated and human-annotated conversation trees",
-    },
+SOURCES = {
+    "ultrachat_200k": "HuggingFaceH4/ultrachat_200k",
+    "oasst1": "OpenAssistant/oasst1",
+    "daily_dialog": "daily_dialog",
+    "snli": "stanfordnlp/snli",
+    "multi_nli": "nyu-mll/multi_nli",
 }
 
 
-def _clean_text(value: Any) -> str:
-    """Remove invalid nulls while preserving line breaks, code, and indentation."""
+def clean_text(value: Any) -> str:
     if not isinstance(value, str):
         return ""
     return value.replace("\x00", " ").replace("\r\n", "\n").replace("\r", "\n").strip()
 
 
 def normalize_messages(raw: Any) -> list[dict[str, str]]:
-    """Normalize common chat schemas and merge adjacent messages with same role."""
+    """Normalize common chat schemas into alternating user/assistant messages."""
     if not isinstance(raw, list):
         return []
     role_map = {
@@ -49,268 +34,282 @@ def normalize_messages(raw: Any) -> list[dict[str, str]]:
         "assistant": "assistant", "gpt": "assistant", "bot": "assistant",
         "system": "system",
     }
-    cleaned: list[dict[str, str]] = []
+    result: list[dict[str, str]] = []
     for item in raw:
         if not isinstance(item, dict):
             continue
-        role = role_map.get(str(item.get("role", item.get("from", ""))).lower())
-        content_value = item.get("content")
-        if content_value is None:
-            content_value = item.get("value", item.get("text", ""))
-        content = _clean_text(content_value)
+        role_raw = item.get("role", item.get("from", ""))
+        role = role_map.get(str(role_raw).lower())
+        value = item.get("content")
+        if value is None:
+            value = item.get("text", item.get("value", ""))
+        content = clean_text(value)
         if not role or not content:
             continue
-        if cleaned and cleaned[-1]["role"] == role:
-            cleaned[-1]["content"] += "\n" + content
+        if result and result[-1]["role"] == role:
+            result[-1]["content"] += "\n" + content
         else:
-            cleaned.append({"role": role, "content": content})
-
-    while cleaned and cleaned[0]["role"] == "assistant":
-        cleaned.pop(0)
-    if not cleaned or cleaned[0]["role"] not in {"user", "system"}:
-        return []
-    if not any(m["role"] == "user" for m in cleaned):
-        return []
-    # A training example should end with an assistant target, not an unanswered prompt.
-    if cleaned[-1]["role"] != "assistant":
-        return []
-    return cleaned
+            result.append({"role": role, "content": content})
+    while result and result[0]["role"] == "assistant":
+        result.pop(0)
+    return result
 
 
-def _sample_dataset_rows(ds, limit: int, seed: int, source_name: str) -> list[dict[str, Any]]:
-    if limit <= 0 or len(ds) == 0:
-        return []
-    take = min(limit, len(ds))
-    selected = ds.shuffle(seed=seed).select(range(take))
-    output: list[dict[str, Any]] = []
-    for row in selected:
-        messages = normalize_messages(row.get("messages"))
-        if messages:
-            output.append({"messages": messages, "source": source_name})
-    return output
+def messages_to_pairs(messages: list[dict[str, str]], max_context_turns: int = 6) -> list[dict[str, str]]:
+    """Turn a multi-turn dialogue into context -> assistant-reply examples."""
+    pairs: list[dict[str, str]] = []
+    usable: list[dict[str, str]] = []
+    for message in messages:
+        role, content = message.get("role"), clean_text(message.get("content"))
+        if role in {"user", "assistant"} and content:
+            usable.append({"role": role, "content": content})
+    for index, message in enumerate(usable):
+        if message["role"] != "assistant" or index == 0:
+            continue
+        if not any(m["role"] == "user" for m in usable[:index]):
+            continue
+        history = usable[max(0, index - max_context_turns):index]
+        context_lines = []
+        for history_index, item in enumerate(history):
+            if history_index == len(history) - 1 and item["role"] == "user":
+                prefix = "CURRENT USER: "
+            else:
+                prefix = "USER: " if item["role"] == "user" else "ASSISTANT: "
+            context_lines.append(prefix + item["content"])
+        context = "\n".join(context_lines)
+        reply = message["content"]
+        if len(context) >= 3 and len(reply) >= 2:
+            pairs.append({"context": context, "reply": reply})
+    return pairs
 
 
-def build_oasst_conversations(limit: int, seed: int = 42) -> list[dict[str, Any]]:
-    """Reconstruct English OASST1 root-to-leaf paths from parent-linked messages."""
-    if limit <= 0:
+def _sample_rows(dataset, limit: int, seed: int):
+    if limit <= 0 or len(dataset) == 0:
         return []
-    print("Loading OpenAssistant/oasst1 (English human conversation paths)...", flush=True)
+    shuffled = dataset.shuffle(seed=seed)
+    return [shuffled[i] for i in range(min(limit, len(shuffled)))]
+
+
+def _oasst_paths(limit: int, seed: int) -> list[dict[str, str]]:
     from datasets import load_dataset
-
-    ds = load_dataset("OpenAssistant/oasst1", split="train")
-    by_id: dict[str, dict[str, Any]] = {}
+    print("Loading OpenAssistant English conversations...", flush=True)
+    ds = load_dataset(SOURCES["oasst1"], split="train")
+    rows: dict[str, dict[str, Any]] = {}
     for row in ds:
         if row.get("lang") != "en" or row.get("deleted") is True or row.get("synthetic") is True:
             continue
         if row.get("tree_state") not in (None, "ready_for_export"):
             continue
-        message_id = row.get("message_id")
-        if message_id:
-            by_id[str(message_id)] = row
-
+        mid = row.get("message_id")
+        if mid:
+            rows[str(mid)] = row
     children: dict[str, list[str]] = defaultdict(list)
-    for message_id, row in by_id.items():
-        parent_id = row.get("parent_id")
-        if parent_id is None:
-            continue
-        parent_key = str(parent_id)
-        if parent_key in by_id:
-            parent = by_id[parent_key]
-            if parent.get("message_tree_id") == row.get("message_tree_id"):
-                children[parent_key].append(message_id)
-
-    leaves = [mid for mid in by_id if not children.get(mid)]
-    paths: list[dict[str, Any]] = []
-    seen: set[tuple[str, ...]] = set()
+    for mid, row in rows.items():
+        parent = row.get("parent_id")
+        if parent is not None and str(parent) in rows:
+            parent_key = str(parent)
+            if rows[parent_key].get("message_tree_id") == row.get("message_tree_id"):
+                children[parent_key].append(mid)
+    leaves = [mid for mid in rows if not children.get(mid)]
+    rng = random.Random(seed)
+    rng.shuffle(leaves)
+    paths: list[dict[str, str]] = []
     role_map = {"prompter": "user", "assistant": "assistant"}
     for leaf in leaves:
         chain: list[str] = []
         cursor: str | None = leaf
-        visited: set[str] = set()
-        tree_id = by_id[leaf].get("message_tree_id")
-        while cursor and cursor in by_id and cursor not in visited:
-            visited.add(cursor)
-            row = by_id[cursor]
+        seen: set[str] = set()
+        tree_id = rows[leaf].get("message_tree_id")
+        while cursor and cursor in rows and cursor not in seen:
+            seen.add(cursor)
+            row = rows[cursor]
             if row.get("message_tree_id") != tree_id:
                 break
             chain.append(cursor)
-            parent_id = row.get("parent_id")
-            cursor = str(parent_id) if parent_id is not None and str(parent_id) in by_id else None
+            parent = row.get("parent_id")
+            cursor = str(parent) if parent is not None and str(parent) in rows else None
         chain.reverse()
-        key = tuple(chain)
-        if key in seen or len(chain) < 2:
-            continue
-        seen.add(key)
         messages = []
         for mid in chain:
-            row = by_id[mid]
+            row = rows[mid]
             role = role_map.get(str(row.get("role", "")).lower())
-            content = _clean_text(row.get("text"))
+            content = clean_text(row.get("text"))
             if role and content:
                 messages.append({"role": role, "content": content})
-        normalized = normalize_messages(messages)
-        if normalized:
-            paths.append({"messages": normalized, "source": "oasst1"})
-
-    rng = random.Random(seed)
-    rng.shuffle(paths)
-    result = paths[: min(limit, len(paths))]
-    print(f"  reconstructed {len(result):,} OASST1 English conversation paths", flush=True)
-    return result
+        pairs = messages_to_pairs(messages)
+        if pairs:
+            paths.extend(pairs)
+        if len(paths) >= limit:
+            break
+    print(f"  reconstructed {len(paths):,} English context/reply pairs", flush=True)
+    return paths[:limit]
 
 
-def _tokenize_conversation(tokenizer, messages: list[dict[str, str]], max_length: int):
-    """Tokenize with strict assistant-only loss; reject missing/broken masks."""
-    encoded = tokenizer.apply_chat_template(
-        messages,
-        tokenize=True,
-        add_generation_prompt=False,
-        enable_thinking=False,
-        return_dict=True,
-        return_assistant_tokens_mask=True,
-    )
-    input_ids = encoded["input_ids"]
-    if hasattr(input_ids, "tolist"):
-        input_ids = input_ids.tolist()
-    if input_ids and isinstance(input_ids[0], list):
-        input_ids = input_ids[0]
-
-    assistant_mask = encoded.get("assistant_masks")
-    if assistant_mask is None:
-        raise RuntimeError(
-            "The tokenizer chat template did not return assistant_masks. "
-            "Refusing to train on user prompts as assistant targets."
-        )
-    if hasattr(assistant_mask, "tolist"):
-        assistant_mask = assistant_mask.tolist()
-    if assistant_mask and isinstance(assistant_mask[0], list):
-        assistant_mask = assistant_mask[0]
-    if len(assistant_mask) != len(input_ids):
-        raise RuntimeError(
-            f"Assistant mask length {len(assistant_mask)} differs from token length {len(input_ids)}."
-        )
-
-    labels = [token if bool(mask) else -100 for token, mask in zip(input_ids, assistant_mask)]
-    if len(input_ids) > max_length:
-        input_ids = input_ids[-max_length:]
-        labels = labels[-max_length:]
-    assistant_label_count = sum(label != -100 for label in labels)
-    if not input_ids or assistant_label_count == 0:
-        return None
-    return {
-        "input_ids": input_ids,
-        "attention_mask": [1] * len(input_ids),
-        "labels": labels,
-        "length": len(input_ids),
-        "assistant_label_tokens": assistant_label_count,
-    }
-
-
-def prepare_conversation_dataset(
-    output_dir: str,
-    model_id: str = MODEL_ID,
-    smol_limit: int = 50_000,
-    ultra_limit: int = 25_000,
-    oasst_limit: int = 10_000,
-    max_length: int = 2048,
-    seed: int = 42,
-) -> None:
-    from datasets import Dataset, DatasetDict, load_dataset
-    from transformers import AutoTokenizer
-
-    if max_length < 256:
-        raise ValueError("max_length must be at least 256 tokens")
-    print("\n=== MCR conversation data preparation ===", flush=True)
-    examples: list[dict[str, Any]] = []
+def build_conversation_pairs(chat_limit: int, seed: int = 42) -> tuple[list[dict[str, str]], dict[str, int]]:
+    from datasets import load_dataset
+    collected: list[dict[str, str]] = []
     counts: dict[str, int] = {}
 
-    print("Loading HuggingFaceTB/smol-smoltalk...", flush=True)
-    smol = load_dataset("HuggingFaceTB/smol-smoltalk", split="train")
-    smol_rows = _sample_dataset_rows(smol, smol_limit, seed, "smol-smoltalk")
-    examples.extend(smol_rows)
-    counts["smol-smoltalk"] = len(smol_rows)
-    print(f"  retained {len(smol_rows):,} completed conversations", flush=True)
+    # Everyday dialogues first, then broad multi-turn instruction/conversation data.
+    try:
+        print("Loading DailyDialog...", flush=True)
+        daily = load_dataset(SOURCES["daily_dialog"], split="train")
+        rows = _sample_rows(daily, min(15_000, chat_limit // 5), seed)
+        added = 0
+        for row in rows:
+            utterances = row.get("dialog", [])
+            messages = []
+            for i, utterance in enumerate(utterances):
+                content = clean_text(utterance)
+                if content:
+                    messages.append({"role": "user" if i % 2 == 0 else "assistant", "content": content})
+            pairs = messages_to_pairs(messages)
+            collected.extend(pairs)
+            added += len(pairs)
+        counts["daily_dialog"] = added
+        print(f"  retained {added:,} context/reply pairs", flush=True)
+    except Exception as exc:
+        print(f"  DailyDialog skipped: {type(exc).__name__}: {exc}", flush=True)
+        counts["daily_dialog"] = 0
 
-    print("Loading HuggingFaceH4/ultrachat_200k train_sft...", flush=True)
-    ultra = load_dataset("HuggingFaceH4/ultrachat_200k", split="train_sft")
-    ultra_rows = _sample_dataset_rows(ultra, ultra_limit, seed + 1, "ultrachat_200k")
-    examples.extend(ultra_rows)
-    counts["ultrachat_200k"] = len(ultra_rows)
-    print(f"  retained {len(ultra_rows):,} completed conversations", flush=True)
+    try:
+        print("Loading UltraChat 200k conversations...", flush=True)
+        ultra = load_dataset(SOURCES["ultrachat_200k"], split="train_sft")
+        remaining = max(0, chat_limit - len(collected))
+        rows = _sample_rows(ultra, min(remaining, 65_000), seed + 1)
+        added = 0
+        for row in rows:
+            pairs = messages_to_pairs(normalize_messages(row.get("messages")))
+            collected.extend(pairs)
+            added += len(pairs)
+        counts["ultrachat_200k"] = added
+        print(f"  retained {added:,} context/reply pairs", flush=True)
+    except Exception as exc:
+        print(f"  UltraChat skipped: {type(exc).__name__}: {exc}", flush=True)
+        counts["ultrachat_200k"] = 0
 
-    oasst_rows = build_oasst_conversations(oasst_limit, seed + 2)
-    examples.extend(oasst_rows)
-    counts["oasst1"] = len(oasst_rows)
+    remaining = max(0, chat_limit - len(collected))
+    if remaining:
+        try:
+            pairs = _oasst_paths(remaining, seed + 2)
+            collected.extend(pairs)
+            counts["oasst1"] = len(pairs)
+        except Exception as exc:
+            print(f"  OpenAssistant skipped: {type(exc).__name__}: {exc}", flush=True)
+            counts["oasst1"] = 0
+    else:
+        counts["oasst1"] = 0
 
-    unique: dict[str, dict[str, Any]] = {}
-    for row in examples:
-        key = json.dumps(row["messages"], ensure_ascii=False, sort_keys=True)
-        unique.setdefault(key, row)
-    examples = list(unique.values())
+    # Deduplicate by input and target; remove near-empty and pathological samples.
+    unique: dict[tuple[str, str], dict[str, str]] = {}
+    for row in collected:
+        context = clean_text(row.get("context"))
+        reply = clean_text(row.get("reply"))
+        if not (3 <= len(context) <= 12_000 and 2 <= len(reply) <= 5_000):
+            continue
+        unique.setdefault((context.casefold(), reply.casefold()), {"context": context, "reply": reply})
+    result = list(unique.values())
+    random.Random(seed).shuffle(result)
+    return result[:chat_limit], counts
+
+
+def build_nli_pairs(limit: int, seed: int = 42) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Load SNLI/MultiNLI sentence-pair judgments; labels: entail/neutral/contradict."""
+    from datasets import load_dataset
+    collected: list[dict[str, Any]] = []
+    counts: dict[str, int] = {}
+    sources = [("snli", SOURCES["snli"]), ("multi_nli", SOURCES["multi_nli"])]
+    per_source = max(1, limit // len(sources))
+    for source_index, (name, repo) in enumerate(sources):
+        wanted = min(per_source, limit - len(collected))
+        if wanted <= 0:
+            break
+        try:
+            print(f"Loading {name} semantic-relation data ({repo})...", flush=True)
+            ds = load_dataset(repo, split="train")
+            sampled = _sample_rows(ds, min(len(ds), wanted * 2), seed + 10 + source_index)
+            accepted = 0
+            for row in sampled:
+                premise = clean_text(row.get("premise"))
+                hypothesis = clean_text(row.get("hypothesis"))
+                try:
+                    label = int(row.get("label", -1))
+                except (TypeError, ValueError):
+                    continue
+                if label not in (0, 1, 2) or not premise or not hypothesis:
+                    continue
+                # Official SNLI/MultiNLI mapping: 0 entailment, 1 neutral, 2 contradiction.
+                collected.append({"premise": premise, "hypothesis": hypothesis, "label": label})
+                accepted += 1
+                if accepted >= wanted:
+                    break
+            counts[name] = accepted
+            print(f"  retained {accepted:,} labeled sentence pairs", flush=True)
+        except Exception as exc:
+            print(f"  {name} skipped: {type(exc).__name__}: {exc}", flush=True)
+            counts[name] = 0
+    random.Random(seed + 20).shuffle(collected)
+    return collected[:limit], counts
+
+
+def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> int:
+    count = 0
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            count += 1
+    return count
+
+
+def prepare_data(output_dir: str, chat_limit: int = 120_000, nli_limit: int = 200_000, seed: int = 42) -> None:
+    if chat_limit < 1000 or nli_limit < 1000:
+        raise ValueError("Use at least 1,000 examples for each training objective.")
+    root = Path(output_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    print("\n=== MCR mathematical-native data preparation ===", flush=True)
+    print("No model checkpoint, tokenizer vocabulary, or pretrained embeddings are downloaded.", flush=True)
+
+    chat, chat_counts = build_conversation_pairs(chat_limit, seed)
+    nli, nli_counts = build_nli_pairs(nli_limit, seed)
+    if len(chat) < 1000:
+        raise RuntimeError(f"Only {len(chat)} conversation pairs were loaded; at least 1,000 are required.")
+    if len(nli) < 1000:
+        raise RuntimeError(f"Only {len(nli)} NLI pairs were loaded; at least 1,000 are required.")
+
     rng = random.Random(seed)
-    rng.shuffle(examples)
-    if len(examples) < 1_000:
-        raise RuntimeError(f"Only {len(examples)} usable conversations were prepared; refusing a tiny run.")
+    rng.shuffle(chat)
+    rng.shuffle(nli)
+    chat_val_n = max(500, int(len(chat) * 0.03))
+    nli_val_n = max(500, int(len(nli) * 0.03))
+    chat_train, chat_val = chat[chat_val_n:], chat[:chat_val_n]
+    nli_train, nli_val = nli[nli_val_n:], nli[:nli_val_n]
 
-    print(f"Total unique completed conversations: {len(examples):,}", flush=True)
-    print("Loading SmolLM3 tokenizer and applying its native chat template...", flush=True)
-    tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=True)
-    if not getattr(tokenizer, "chat_template", None):
-        raise RuntimeError("The selected model did not provide a chat template.")
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    raw = Dataset.from_list(examples)
-
-    def tokenize_batch(batch):
-        rows = []
-        for messages in batch["messages"]:
-            item = _tokenize_conversation(tokenizer, messages, max_length)
-            if item is not None:
-                rows.append(item)
-        keys = ("input_ids", "attention_mask", "labels", "length", "assistant_label_tokens")
-        return {key: [row[key] for row in rows] for key in keys}
-
-    tokenized = raw.map(
-        tokenize_batch,
-        batched=True,
-        batch_size=64,
-        num_proc=2,
-        remove_columns=raw.column_names,
-        desc="Tokenizing assistant turns",
-    )
-    if len(tokenized) < 1_000:
-        raise RuntimeError(f"Tokenization retained only {len(tokenized)} conversations.")
-
-    split = tokenized.train_test_split(test_size=0.02, seed=seed, shuffle=True)
-    data = DatasetDict({"train": split["train"], "validation": split["test"]})
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-    data.save_to_disk(str(output_path))
-
-    token_sample = tokenized.select(range(min(1000, len(tokenized))))
-    assistant_labels = sum(int(x) for x in token_sample["assistant_label_tokens"])
-    total_tokens = sum(int(x) for x in token_sample["length"])
-    manifest = {
-        "model": model_id,
-        "max_sequence_length": max_length,
-        "seed": seed,
-        "requested_sample_caps": {"smol_smoltalk": smol_limit, "ultrachat": ultra_limit, "oasst1": oasst_limit},
-        "source_counts_before_deduplication": counts,
-        "unique_conversation_count": len(examples),
-        "tokenized_conversation_count": len(tokenized),
-        "train_count": len(data["train"]),
-        "validation_count": len(data["validation"]),
-        "assistant_loss_mask_verified": True,
-        "sample_assistant_target_token_fraction": round(assistant_labels / max(1, total_tokens), 4),
-        "assistant_target_tokens_in_sample": assistant_labels,
-        "input_tokens_in_sample": total_tokens,
-        "sources": DATASET_SOURCES,
-        "dataset_revision_policy": "Hugging Face dataset main revisions at run time; see dataset fingerprints in the local Datasets cache.",
-        "note": "Only assistant spans contribute to loss; user/system spans are masked. Conversations are required to end with an assistant reply.",
+    counts = {
+        "chat_train": _write_jsonl(root / "chat_train.jsonl", chat_train),
+        "chat_validation": _write_jsonl(root / "chat_validation.jsonl", chat_val),
+        "nli_train": _write_jsonl(root / "nli_train.jsonl", nli_train),
+        "nli_validation": _write_jsonl(root / "nli_validation.jsonl", nli_val),
     }
-    (output_path / "mcr_data_manifest.json").write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    manifest = {
+        "architecture": "MCR byte-semantic encoder + metric learning + NLI relation head",
+        "pretrained_model_weights": False,
+        "pretrained_tokenizer": False,
+        "autoregressive_language_model": False,
+        "input_representation": "UTF-8 byte values; no BPE, WordPiece, SentencePiece, or downloaded vocabulary",
+        "chat_source_counts": chat_counts,
+        "nli_source_counts": nli_counts,
+        "split_counts": counts,
+        "label_map": {"0": "entailment", "1": "neutral", "2": "contradiction"},
+        "seed": seed,
+        "licenses": {
+            "ultrachat_200k": "MIT (verify current upstream dataset card and source terms)",
+            "oasst1": "Apache-2.0 (verify current upstream dataset card)",
+            "daily_dialog": "CC BY-NC-SA 4.0 (non-commercial; verify upstream terms)",
+            "snli": "CC BY-SA 4.0 (verify current upstream dataset card)",
+            "multi_nli": "CC BY-SA 4.0 (verify current upstream dataset card)",
+        },
+        "warning": "Dataset labels supervise limited tasks; they do not establish human-level understanding.",
+    }
+    (root / "data_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps(manifest, indent=2), flush=True)
-    print(f"Prepared dataset saved: {output_path}", flush=True)
+    print(f"Data written to: {root}", flush=True)

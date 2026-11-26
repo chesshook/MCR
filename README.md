@@ -1,38 +1,64 @@
-# MCR — Conversational Model, Kaggle T4 ×2
+# MCR — Mathematical-native Comprehension & Response
 
-MCR is a reproducible conversational-model fine-tuning project. It adapts an open 3B instruction model using a multi-source conversation mixture and synchronized dual-GPU QLoRA.
+MCR is an original, from-scratch neural-symbolic research system for English conversation. It is deliberately **not** a pretrained language model, a next-token predictor, or a fine-tuned foundation model.
 
-> **Architecture disclosure:** MCR v2 uses Hugging Face's open SmolLM3-3B pretrained instruction model as its foundation. The base model supplies broad language and world-knowledge capability; this repository trains an MCR-specific LoRA adapter. It does not pretrain a 3B foundation model from random weights, and it does not use Qwen. Training a comparable foundation model from scratch is not realistic in one Kaggle T4×2 session.
+## Architecture contract
 
-## Pipeline
+- All MCR weights are initialized randomly at the start of training.
+- Text is represented as UTF-8 byte values. There is no BPE, WordPiece, SentencePiece, downloaded vocabulary, or pretrained embedding table.
+- A non-autoregressive byte CNN + bidirectional GRU builds sentence vectors.
+- A contrastive metric-learning objective aligns conversation contexts with their assistant replies.
+- A three-way semantic-relation head learns entailment, neutral relation, and contradiction from sentence pairs.
+- Chat replies are selected from a paired semantic memory by nearest-neighbour retrieval. There is no decoder and no autoregressive text generation.
+- The default network has approximately 15.1 million trainable parameters.
+- Both T4 GPUs train the same model with PyTorch DistributedDataParallel and NCCL gradient all-reduce. Each GPU has its own model replica; VRAM is not pooled.
 
-- NF4 4-bit QLoRA, FP16 compute, rank-32 LoRA adapters.
-- Two torchrun workers, one process per T4, using PyTorch DDP + NCCL all-reduce to synchronize gradients after each accumulation window. VRAM is not pooled.
-- English training mixture: Smol-SmolTalk (50k cap), UltraChat 200k SFT (25k cap), and OpenAssistant OASST1 human conversation paths (10k cap).
-- Native SmolLM3 chat template with strict assistant-only labels. Dataset preparation refuses to proceed if valid assistant-span masks are unavailable.
-- 2,048-token training context, 2% held-out validation, resumable checkpoints every 500 optimizer steps, evaluation every 1,000 steps.
-- One Kaggle cell clones this repo, prepares the data, runs both GPUs, saves the adapter, and records manual-review chat examples.
+This is an intentionally different architecture from a conventional generative LLM. UTF-8 bytes are only the numeric input representation; they are not a downloaded token vocabulary or a pretrained language model.
 
-## Kaggle start
+## What this version can and cannot do
+
+The system learns a semantic metric, sentence-pair relation labels, and response selection over its training corpus. It can retrieve conversational replies when a new conversation context resembles training examples. It can expose its learned entailment/neutral/contradiction judgment through `/judge`.
+
+It does **not** yet produce arbitrary novel sentences, perform unrestricted multi-step reasoning, or possess a complete grounded world model. A response retrieved from the corpus can be irrelevant even when its similarity score is high. Check held-out retrieval/NLI scores and manually inspect the response bank before treating it as useful. This is a real trainable mathematical architecture, not a claim of perfect or human-level understanding.
+
+## Data sources
+
+See [DATASETS.md](DATASETS.md). The pipeline uses conversation data and labeled sentence-pair relations only. It downloads no model weights, tokenizer files, pretrained embeddings, or generation checkpoints.
+
+## Kaggle T4 ×2 training
 
 1. Create a Kaggle Notebook.
-2. Set **Settings → Accelerator → GPU T4 ×2**.
-3. Turn **Internet On**.
-4. Paste the complete KAGGLE_ONE_CELL.py file into one notebook cell and run it.
+2. Select **GPU T4 ×2** in Notebook Settings and enable Internet.
+3. Copy the entire contents of [`KAGGLE_ONE_CELL.py`](KAGGLE_ONE_CELL.py) into one code cell and run it.
+4. The cell clones the `math-native-v1` branch, checks both GPUs, prepares the datasets, launches two synchronized training workers, evaluates held-out data, and exports the trained artifacts.
+5. Use Kaggle **Save Version** to preserve the outputs.
 
-The cell downloads this repository and its pinned dependencies. The training launcher writes:
-- /kaggle/working/MCR_OUTPUT — adapter, tokenizer, checkpoints and report
-- /kaggle/working/MCR_TOKENIZED_DATA — tokenized conversation mixture and manifest
-- /kaggle/working/MCR_ADAPTER.zip — final adapter export without intermediate checkpoints
+Default workload:
 
-After completion, use Kaggle **Save Version** to preserve the outputs. To chat in the same notebook after training:
+- Up to 120,000 conversation context/reply pairs.
+- Up to 200,000 entailment/neutral/contradiction examples.
+- 2 epochs, 32 examples per GPU, 384-byte sequence cap.
+- Mixed FP16 compute, AdamW, cosine schedule, gradient clipping, and resumable checkpoints.
+- Checkpoint: `/kaggle/working/MCR_OUTPUT/training_state.pt`.
+- Final model: `/kaggle/working/MCR_OUTPUT/mcr_model.pt`.
+- Retrieval memory: `/kaggle/working/MCR_OUTPUT/response_context_index.npy` and `response_bank.jsonl`.
+- Export: `/kaggle/working/MCR_MATH_NATIVE.zip`.
+
+The dataset caps and number of epochs can be changed in the Kaggle cell. A successful run is not the same thing as good comprehension; the report contains held-out metrics.
+
+## Chat after training
 
 ```python
-!python /kaggle/working/MCR/chat.py --adapter-dir /kaggle/working/MCR_OUTPUT
+!python /kaggle/working/MCR/chat.py --model-dir /kaggle/working/MCR_OUTPUT --debug
 ```
 
-## Important limitations
+Commands: `/reset`, `/exit`, `/matches`, and `/judge PREMISE || HYPOTHESIS`.
 
-This is supervised fine-tuning of an existing instruction model, not from-scratch pretraining. It can adapt the model's conversational behaviour, but does not guarantee perfect understanding, factual correctness, or human-level reasoning. Broad language capability primarily comes from the pretrained foundation. Held-out loss and the generated smoke-test answers must be inspected; a successful training run alone is not proof of intelligence.
+## Run the offline tests
 
-See DATASETS.md for data sources and license notes.
+```bash
+python -m compileall -q .
+python -m unittest discover -s tests -v
+```
+
+The offline tests do not download data or require CUDA. Training requires Kaggle's preinstalled PyTorch CUDA build plus the Hugging Face `datasets` reader.

@@ -1,4 +1,4 @@
-# MCR — copy this entire cell into a Kaggle Notebook and run it once.
+# MCR mathematical-native trainer — paste this entire file into one Kaggle cell.
 # Notebook Settings: Accelerator = GPU T4 x2; Internet = On.
 from pathlib import Path
 import os
@@ -6,54 +6,34 @@ import subprocess
 import sys
 
 REPO = "https://github.com/chesshook/MCR.git"
-WORK = Path("/kaggle/working")
-REPO_DIR = WORK / "MCR"
-
-if REPO_DIR.exists() and (REPO_DIR / ".git").exists():
-    subprocess.run(["git", "-C", str(REPO_DIR), "pull", "--ff-only"], check=True)
+BRANCH = "math-native-v1"
+ROOT = Path("/kaggle/working/MCR")
+if ROOT.exists() and (ROOT / ".git").exists():
+    subprocess.run(["git", "-C", str(ROOT), "fetch", "origin", BRANCH], check=True)
+    subprocess.run(["git", "-C", str(ROOT), "checkout", BRANCH], check=True)
+    subprocess.run(["git", "-C", str(ROOT), "pull", "--ff-only", "origin", BRANCH], check=True)
 else:
-    subprocess.run(["git", "clone", "--depth", "1", REPO, str(REPO_DIR)], check=True)
-
-# Preserve Kaggle's preinstalled torch/CUDA stack; install only the project dependencies.
-subprocess.run(
-    [
-        sys.executable, "-m", "pip", "install", "-q",
-        "-r", str(REPO_DIR / "requirements-kaggle.txt"),
-    ],
-    check=True,
-)
+    subprocess.run(["git", "clone", "--depth", "1", "--branch", BRANCH, REPO, str(ROOT)], check=True)
 
 import torch
-
 if not torch.cuda.is_available() or torch.cuda.device_count() != 2:
-    detected = torch.cuda.device_count() if torch.cuda.is_available() else 0
-    raise RuntimeError(
-        f"MCR requires Kaggle GPU T4 x2; detected {detected}. "
-        "Choose Settings > Accelerator > GPU T4 x2 and enable Internet."
-    )
+    actual = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    raise RuntimeError(f"Select Kaggle GPU T4 x2. Detected {actual} CUDA devices.")
+for i in range(2):
+    p = torch.cuda.get_device_properties(i)
+    print(f"GPU {i}: {p.name} | {p.total_memory / 1024**3:.1f} GiB")
+    if "T4" not in p.name.upper():
+        raise RuntimeError(f"Expected a T4 at GPU {i}; found {p.name}")
+print("The system is trained from random initialization. No pretrained LLM or tokenizer is downloaded.")
 
-print("MCR will use two synchronized data-parallel workers:")
-for index in range(2):
-    gpu = torch.cuda.get_device_properties(index)
-    print(f"GPU {index}: {gpu.name} | {gpu.total_memory / 1024**3:.1f} GiB VRAM")
-    if "T4" not in gpu.name.upper():
-        raise RuntimeError(f"Expected T4 at GPU {index}, got {gpu.name}")
-
-os.environ.setdefault("HF_HOME", "/kaggle/working/.cache/huggingface")
-os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-os.environ.setdefault("NCCL_DEBUG", "WARN")
-
-subprocess.run(
-    [
-        sys.executable, str(REPO_DIR / "launch_kaggle.py"),
-        "--output-dir", "/kaggle/working/MCR_OUTPUT",
-        "--resume",
-    ],
-    cwd=REPO_DIR,
-    env=os.environ.copy(),
-    check=True,
-)
-print(
-    "Finished. Save a Kaggle notebook version so MCR_OUTPUT and MCR_ADAPTER.zip "
-    "are preserved as downloadable output artifacts."
-)
+subprocess.run([
+    sys.executable, str(ROOT / "launch_kaggle.py"),
+    "--data-dir", "/kaggle/working/MCR_DATA",
+    "--output-dir", "/kaggle/working/MCR_OUTPUT",
+    "--chat-limit", "120000",
+    "--nli-limit", "200000",
+    "--epochs", "2",
+    "--batch-size", "32",
+    "--max-bytes", "384",
+    "--resume",
+], cwd=ROOT, check=True, env=os.environ.copy())
