@@ -1,8 +1,8 @@
-name: MCR offline tests
+name: MCR mathematical-native offline tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, math-native-v1]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -21,5 +21,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Compile Python sources
         run: python -m compileall -q .
-      - name: Run offline data tests
+      - name: Run offline tests
         run: python -m unittest discover -s tests -v
+      - name: Verify no pretrained model or tokenizer path remains
+        run: |
+          ! grep -R -n -E 'AutoModelForCausalLM|PeftModel|BitsAndBytesConfig|SmolLM3|Qwen|apply_chat_template|AutoTokenizer' --include='*.py' .

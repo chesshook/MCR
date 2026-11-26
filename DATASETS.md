@@ -1,20 +1,21 @@
-# MCR data and model provenance
+# MCR training data and provenance
 
-MCR builds an English conversational mixture from these sources. Source licenses are retained in the runtime manifest. Check each upstream dataset card before redistributing a trained derivative, especially because datasets can be updated independently of this code.
+MCR downloads datasets at run time. It does **not** download or use pretrained model weights, language tokenizers, or precomputed model embeddings.
 
-| Source | Use | Upstream license |
+| Dataset | Training role | License / use note |
 |---|---|---|
-| [HuggingFaceTB/smol-smoltalk](https://huggingface.co/datasets/HuggingFaceTB/smol-smoltalk) | Short, varied instruction and dialogue samples | Apache-2.0 on dataset card; verify upstream component terms |
-| [HuggingFaceH4/ultrachat_200k](https://huggingface.co/datasets/HuggingFaceH4/ultrachat_200k) (train_sft) | Multi-turn instruction conversations | MIT |
-| [OpenAssistant/oasst1](https://huggingface.co/datasets/OpenAssistant/oasst1) | English parent-linked human conversation paths | Apache-2.0 |
-| [HuggingFaceTB/SmolLM3-3B](https://huggingface.co/HuggingFaceTB/SmolLM3-3B) | Pretrained instruction foundation model | Apache-2.0 |
+| [DailyDialog](https://huggingface.co/datasets/daily_dialog) | Everyday multi-turn dialogue | Commonly distributed under CC BY-NC-SA 4.0; verify the current dataset card and source terms. |
+| [UltraChat 200k](https://huggingface.co/datasets/HuggingFaceH4/ultrachat_200k) | Longer multi-turn assistant conversations | Dataset card lists MIT; verify component/source terms. |
+| [OpenAssistant OASST1](https://huggingface.co/datasets/OpenAssistant/oasst1) | English human conversation paths | Apache-2.0; verify the current dataset card and per-message provenance. |
+| [SNLI](https://huggingface.co/datasets/stanfordnlp/snli) | Entailment, neutral, contradiction sentence pairs | CC BY-SA 4.0; retain attribution. |
+| [MultiNLI](https://huggingface.co/datasets/nyu-mll/multi_nli) | Additional sentence-pair relation supervision | CC BY-SA 4.0; retain attribution. |
 
-The code filters OASST1 to English, non-deleted, non-synthetic messages in ready-for-export trees, then follows each leaf to its parent chain. It does not import non-English OASST data in this first recipe.
+The loader skips sources that fail to load and records retained counts. Training stops if fewer than 1,000 usable conversation pairs or sentence-relation pairs are available. The runtime `data_manifest.json` records the sources and sample counts actually used. Review upstream terms before redistributing a trained model, especially the non-commercial conditions on DailyDialog.
 
-Default sampling caps are 50,000 Smol-SmolTalk examples, 25,000 UltraChat examples and 10,000 OASST1 paths. The data is shuffled with fixed seeds, de-duplicated by normalized message content and split into 98% train / 2% validation. The caps are configurable in launch_kaggle.py.
+## Labels
 
-## Important provenance distinction
+SNLI and MultiNLI labels are interpreted as: `0 = entailment`, `1 = neutral`, `2 = contradiction`. Invalid/unlabeled rows are excluded.
 
-SmolLM3-3B is already pretrained and instruction-tuned. Its public model card describes a 3B decoder-only model, 11.2T pretraining tokens and subsequent instruction/alignment stages. MCR does not recreate that enormous pretraining run. It fine-tunes an adapter on the listed conversational mixture. The base model's own license and attribution continue to apply.
+## Data split
 
-The MCR repository contains code and provenance metadata only. It does not commit downloaded datasets, base-model weights, Kaggle caches or trained model weights.
+Data is deduplicated for conversations, deterministically shuffled, and split into training/validation subsets. Validation examples are not used for gradient updates. The limits configured in the Kaggle launcher are maximums, not guaranteed retained totals.

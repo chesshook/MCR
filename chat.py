@@ -1,123 +1,123 @@
-"""Interactive MCR chat using the saved adapter and the same open base model."""
+"""Interactive MCR chat using semantic nearest-neighbour response retrieval.
+
+There is no language-model decoder here: each reply is selected from a paired
+conversation example by the trained semantic metric model.
+"""
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
 
+import numpy as np
 import torch
-from peft import PeftModel
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-BASE_MODEL = "HuggingFaceTB/SmolLM3-3B"
-SYSTEM_PROMPT = (
-    "/no_think\nYou are MCR, a clear and thoughtful conversational assistant. "
-    "Understand the full context before answering. Explain ideas in plain language. "
-    "Be accurate, acknowledge uncertainty, and never invent facts or pretend to have performed actions. "
-    "Use earlier conversation context when it is relevant."
+from mcr.encoding import encode_bytes, pad_sequences
+from mcr.model import MCRModel
+
+LABELS = {0: "entailment", 1: "neutral", 2: "contradiction"}
+FALLBACK = (
+    "I'm not confident I've matched that to a reliable response. "
+    "Could you rephrase it or add a little context?"
 )
 
 
-def load_chat_model(adapter_dir: str):
-    if not torch.cuda.is_available():
-        raise RuntimeError("CUDA is required for this 3B model's 4-bit chat runtime.")
-    tokenizer = AutoTokenizer.from_pretrained(adapter_dir, use_fast=True)
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    quant = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_compute_dtype=torch.float16,
-    )
-    base = AutoModelForCausalLM.from_pretrained(
-        BASE_MODEL,
-        quantization_config=quant,
-        torch_dtype=torch.float16,
-        device_map={"": 0},
-        low_cpu_mem_usage=True,
-        attn_implementation="sdpa",
-    )
-    model = PeftModel.from_pretrained(base, adapter_dir)
-    model.eval()
-    return model, tokenizer
+class MCRChat:
+    def __init__(self, model_dir: str, device: str = "auto", max_bytes: int | None = None,
+                 min_similarity: float = 0.20):
+        self.root = Path(model_dir)
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = torch.device(device)
+        config = json.loads((self.root / "mcr_config.json").read_text(encoding="utf-8"))
+        self.max_bytes = int(max_bytes or config["max_bytes"])
+        self.min_similarity = float(config.get("default_min_similarity", min_similarity))
+        if min_similarity != 0.20:
+            self.min_similarity = float(min_similarity)
+        self.model = MCRModel().to(self.device)
+        try:
+            state = torch.load(self.root / "mcr_model.pt", map_location="cpu", weights_only=True)
+        except TypeError:
+            state = torch.load(self.root / "mcr_model.pt", map_location="cpu")
+        self.model.load_state_dict(state)
+        self.model.eval()
+        # Convert once at load time; avoid copying the complete index on every turn.
+        self.index = np.asarray(np.load(self.root / "response_index.npy"), dtype=np.float32)
+        with (self.root / "response_bank.jsonl").open("r", encoding="utf-8") as handle:
+            self.responses = [json.loads(line)["reply"] for line in handle if line.strip()]
+        if len(self.responses) != self.index.shape[0]:
+            raise RuntimeError("MCR retrieval index and response bank have different row counts.")
+        self.last_matches: list[tuple[float, str]] = []
 
+    def _encode(self, text: str) -> np.ndarray:
+        ids, masks, _ = pad_sequences([encode_bytes(text, self.max_bytes)])
+        ids_t = torch.tensor(ids, dtype=torch.long, device=self.device)
+        masks_t = torch.tensor(masks, dtype=torch.bool, device=self.device)
+        with torch.no_grad():
+            with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=self.device.type == "cuda"):
+                vector = self.model.encoder(ids_t, masks_t)
+        return vector.float().cpu().numpy()[0]
 
-def answer(model, tokenizer, history, user_text: str, max_new_tokens: int = 384) -> str:
-    # Keep a bounded token window while retaining complete user/assistant pairs.
-    context = list(history)
-    while True:
-        messages = (
-            [{"role": "system", "content": SYSTEM_PROMPT}]
-            + context
-            + [{"role": "user", "content": user_text}]
-        )
-        probe = tokenizer.apply_chat_template(
-            messages,
-            enable_thinking=False,
-            add_generation_prompt=True,
-            tokenize=True,
-            return_tensors="pt",
-        )
-        if probe.shape[-1] <= 4096 or len(context) < 2:
-            break
-        context = context[2:]
-
-    inputs = tokenizer.apply_chat_template(
-        messages,
-        enable_thinking=False,
-        add_generation_prompt=True,
-        tokenize=True,
-        return_dict=True,
-        return_tensors="pt",
-    ).to(model.device)
-    with torch.inference_mode():
-        generated = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=True,
-            temperature=0.65,
-            top_p=0.90,
-            repetition_penalty=1.06,
-            eos_token_id=tokenizer.eos_token_id,
-            pad_token_id=tokenizer.pad_token_id,
-            use_cache=True,
-        )
-    new_tokens = generated[0, inputs["input_ids"].shape[-1]:]
-    return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--adapter-dir", default="/kaggle/working/MCR_OUTPUT")
-    parser.add_argument("--smoke-test", action="store_true")
-    parser.add_argument("--max-new-tokens", type=int, default=384)
-    args = parser.parse_args()
-
-    model, tokenizer = load_chat_model(args.adapter_dir)
-    if args.smoke_test:
-        prompts = [
-            "Hi! Let's have a normal conversation. What would you like to talk about?",
-            "The river bank was muddy while the bank manager counted the deposits. Explain the two meanings of bank in this sentence.",
-            "Can you teach me how memory works? Explain it simply.",
-            "I told Maya that she should bring her book. Who should bring the book?",
-            "I did not say that the answer was impossible. What exactly did I deny?",
+    @staticmethod
+    def make_context(history: list[dict[str, str]], current: str) -> str:
+        recent = history[-5:]
+        lines = [
+            ("USER: " if row["role"] == "user" else "ASSISTANT: ") + row["content"]
+            for row in recent
         ]
-        results = []
-        for prompt in prompts:
-            print("\nUSER:", prompt, flush=True)
-            response = answer(model, tokenizer, [], prompt, args.max_new_tokens)
-            print("MCR:", response, flush=True)
-            results.append({"prompt": prompt, "response": response})
-        output_file = Path(args.adapter_dir) / "mcr_smoke_test.json"
-        output_file.write_text(
-            json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        print(f"Smoke-test responses saved to: {output_file}", flush=True)
-        return
+        lines.append("CURRENT USER: " + current)
+        return "\n".join(lines)
 
-    history = []
-    print("MCR chat ready. Commands: /exit, /reset", flush=True)
+    def answer(self, history: list[dict[str, str]], prompt: str, top_k: int = 5) -> str:
+        query = self._encode(self.make_context(history, prompt)).astype(np.float32)
+        scores = self.index @ query
+        k = min(max(1, top_k), len(scores))
+        candidate_ids = np.argpartition(-scores, k - 1)[:k]
+        candidate_ids = candidate_ids[np.argsort(-scores[candidate_ids])]
+        matches: list[tuple[float, str]] = []
+        seen: set[str] = set()
+        for index in candidate_ids:
+            reply = self.responses[int(index)].strip()
+            key = reply.casefold()
+            if reply and key not in seen:
+                matches.append((float(scores[index]), reply))
+                seen.add(key)
+        self.last_matches = matches
+        if not matches or matches[0][0] < self.min_similarity:
+            return FALLBACK
+        return matches[0][1]
+
+    def judge(self, premise: str, hypothesis: str) -> tuple[str, list[float]]:
+        left, right = encode_bytes(premise, self.max_bytes), encode_bytes(hypothesis, self.max_bytes)
+        li, lm, _ = pad_sequences([left])
+        ri, rm, _ = pad_sequences([right])
+        batch = {
+            "premise_ids": torch.tensor(li, dtype=torch.long, device=self.device),
+            "premise_mask": torch.tensor(lm, dtype=torch.bool, device=self.device),
+            "hypothesis_ids": torch.tensor(ri, dtype=torch.long, device=self.device),
+            "hypothesis_mask": torch.tensor(rm, dtype=torch.bool, device=self.device),
+        }
+        with torch.no_grad():
+            with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=self.device.type == "cuda"):
+                logits = self.model(task="nli", **batch)
+            probabilities = torch.softmax(logits.float(), dim=-1)[0].cpu().tolist()
+        label = LABELS[int(np.argmax(probabilities))]
+        return label, probabilities
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model-dir", default="/kaggle/working/MCR_OUTPUT")
+    parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda"))
+    parser.add_argument("--min-similarity", type=float, default=0.20)
+    parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--debug", action="store_true")
+    args = parser.parse_args()
+    bot = MCRChat(args.model_dir, args.device, min_similarity=args.min_similarity)
+    history: list[dict[str, str]] = []
+    print("MCR mathematical-native chat ready.")
+    print("Replies are retrieved from learned semantic memory; there is no text decoder.")
+    print("Commands: /exit, /reset, /judge PREMISE || HYPOTHESIS, /matches")
     while True:
         try:
             prompt = input("\nyou> ").strip()
@@ -126,19 +126,35 @@ def main() -> None:
             break
         if not prompt:
             continue
-        if prompt.lower() in {"/exit", "exit", "quit"}:
+        lowered = prompt.lower()
+        if lowered in {"/exit", "exit", "quit"}:
             break
-        if prompt.lower() == "/reset":
-            history = []
-            print("Conversation cleared.")
+        if lowered == "/reset":
+            history.clear()
+            print("MCR> Conversation history cleared.")
             continue
-        response = answer(model, tokenizer, history, prompt, args.max_new_tokens)
+        if lowered.startswith("/judge "):
+            payload = prompt[7:]
+            if "||" not in payload:
+                print("Usage: /judge premise || hypothesis")
+                continue
+            premise, hypothesis = payload.split("||", 1)
+            label, probabilities = bot.judge(premise.strip(), hypothesis.strip())
+            print("MCR>", label, "| probabilities:", [round(x, 4) for x in probabilities])
+            continue
+        if lowered == "/matches":
+            if not bot.last_matches:
+                print("MCR> No retrieval candidates yet.")
+            for score, reply in bot.last_matches:
+                print(f"  {score:.4f}  {reply[:240]}")
+            continue
+        response = bot.answer(history, prompt, top_k=args.top_k)
         print("\nMCR>", response, flush=True)
-        history.extend([
-            {"role": "user", "content": prompt},
-            {"role": "assistant", "content": response},
-        ])
-        history = history[-20:]
+        if args.debug and bot.last_matches:
+            print(f"[retrieval similarity={bot.last_matches[0][0]:.4f}]", flush=True)
+        history.extend([{"role": "user", "content": prompt},
+                        {"role": "assistant", "content": response}])
+        history = history[-12:]
 
 
 if __name__ == "__main__":

@@ -1,9 +1,11 @@
 __pycache__/
 *.py[cod]
-.cache/
+.kaggle/
 data/
-outputs/
+MCR_DATA/
 MCR_OUTPUT/
-MCR_TOKENIZED_DATA/
-/kaggle/
-*.log
+*.pt
+*.npy
+*.npz
+*.jsonl
+*.zip

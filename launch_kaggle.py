@@ -1,120 +1,89 @@
-"""One-command Kaggle T4x2 orchestration: prepare data once, then train with DDP."""
+"""One-command training orchestration for two synchronized Kaggle T4 GPUs."""
 from __future__ import annotations
-
 import argparse
+import importlib.util
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 import zipfile
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-dir", default="/kaggle/working/MCR_OUTPUT")
-    parser.add_argument("--data-dir", default="/kaggle/working/MCR_TOKENIZED_DATA")
-    parser.add_argument("--smol-limit", type=int, default=50_000)
-    parser.add_argument("--ultra-limit", type=int, default=25_000)
-    parser.add_argument("--oasst-limit", type=int, default=10_000)
-    parser.add_argument("--max-length", type=int, default=2048)
-    parser.add_argument("--epochs", type=float, default=1.0)
-    parser.add_argument("--resume", action="store_true")
-    args = parser.parse_args()
+def ensure_data_dependency():
+    if importlib.util.find_spec("datasets") is None:
+        print("Installing the dataset reader only (no model/tokenizer libraries)...", flush=True)
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-deps", "datasets==3.6.0"], check=True)
+    import datasets  # noqa: F401
+    import numpy  # noqa: F401
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--data-dir", default="/kaggle/working/MCR_DATA")
+    p.add_argument("--output-dir", default="/kaggle/working/MCR_OUTPUT")
+    p.add_argument("--chat-limit", type=int, default=120_000)
+    p.add_argument("--nli-limit", type=int, default=200_000)
+    p.add_argument("--epochs", type=int, default=4)
+    p.add_argument("--batch-size", type=int, default=32)
+    p.add_argument("--max-bytes", type=int, default=512)
+    p.add_argument("--resume", action="store_true")
+    args = p.parse_args()
 
     import torch
-
     if not torch.cuda.is_available() or torch.cuda.device_count() != 2:
         count = torch.cuda.device_count() if torch.cuda.is_available() else 0
-        raise SystemExit(
-            f"MCR requires Kaggle GPU T4 x2. CUDA devices detected: {count}. "
-            "Set Notebook Settings > Accelerator > GPU T4 x2 and turn Internet on."
-        )
-    print("=== Kaggle hardware allocation ===", flush=True)
+        raise RuntimeError(f"Expected Kaggle T4 x2; found {count} CUDA devices. Set Accelerator=GPU T4 x2.")
     for index in range(2):
         props = torch.cuda.get_device_properties(index)
-        print(f"GPU {index}: {props.name}, {props.total_memory / 1024**3:.1f} GiB VRAM", flush=True)
+        print(f"GPU {index}: {props.name}, {props.total_memory / 1024**3:.1f} GiB", flush=True)
         if "T4" not in props.name.upper():
-            raise SystemExit(f"GPU {index} is {props.name!r}; this recipe is configured for T4.")
-    print(f"CPU cores visible: {os.cpu_count()}; Kaggle provides the runtime RAM.", flush=True)
-    print(
-        "Both GPUs will run synchronized DDP data-parallel workers; VRAM is not pooled.",
-        flush=True,
-    )
+            raise RuntimeError(f"GPU {index} is not a T4: {props.name}")
+    print(f"CPU cores visible: {os.cpu_count()}", flush=True)
+    print("Both T4s will train from scratch with DDP/NCCL gradient all-reduce.", flush=True)
+    print("No pretrained model, tokenizer, embeddings, or text-generation weights are used.", flush=True)
 
+    ensure_data_dependency()
     root = Path(__file__).resolve().parent
-    data_dir = Path(args.data_dir)
-    output_dir = Path(args.output_dir)
-    env = os.environ.copy()
-    env.setdefault("HF_HOME", "/kaggle/working/.cache/huggingface")
-    env.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "0")
-    env.setdefault("TOKENIZERS_PARALLELISM", "false")
-    env.setdefault("NCCL_DEBUG", "WARN")
-    env.setdefault("OMP_NUM_THREADS", "2")
-    env.setdefault("MKL_NUM_THREADS", "2")
-    env.setdefault("OPENBLAS_NUM_THREADS", "1")
-    env.setdefault("TORCH_NCCL_ASYNC_ERROR_HANDLING", "1")
-    env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-
-    prep_cmd = [
-        sys.executable, str(root / "prepare_data.py"),
-        "--output-dir", str(data_dir),
-        "--smol-limit", str(args.smol_limit),
-        "--ultra-limit", str(args.ultra_limit),
-        "--oasst-limit", str(args.oasst_limit),
-        "--max-length", str(args.max_length),
-    ]
-    manifest = data_dir / "mcr_data_manifest.json"
-    dataset_marker = data_dir / "dataset_dict.json"
-    if dataset_marker.exists() and manifest.exists():
-        print(f"\n=== Reusing prepared tokenized data at {data_dir} ===", flush=True)
+    data_dir, output_dir = Path(args.data_dir), Path(args.output_dir)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest = data_dir / "data_manifest.json"
+    if manifest.exists() and all((data_dir / name).exists() for name in
+                                 ("chat_train.jsonl", "chat_validation.jsonl", "nli_train.jsonl", "nli_validation.jsonl")):
+        print(f"Reusing prepared data in {data_dir}", flush=True)
     else:
-        print("\n=== Preparing multi-source training data once on CPU ===", flush=True)
-        if data_dir.exists():
-            print(f"Removing incomplete tokenized-data directory: {data_dir}", flush=True)
-            shutil.rmtree(data_dir)
-        subprocess.run(prep_cmd, cwd=root, env=env, check=True)
+        cmd = [sys.executable, str(root / "prepare_data.py"), "--output-dir", str(data_dir),
+               "--chat-limit", str(args.chat_limit), "--nli-limit", str(args.nli_limit)]
+        subprocess.run(cmd, cwd=root, check=True)
 
-    train_cmd = [
-        sys.executable, "-m", "torch.distributed.run",
-        "--standalone", "--nnodes=1", "--nproc_per_node=2",
-        str(root / "train.py"),
-        "--data-dir", str(data_dir),
-        "--output-dir", str(output_dir),
-        "--epochs", str(args.epochs),
-    ]
-    if args.resume or output_dir.exists():
+    env = os.environ.copy()
+    env["OMP_NUM_THREADS"] = "2"
+    env["MKL_NUM_THREADS"] = "2"
+    env["OPENBLAS_NUM_THREADS"] = "1"
+    env["TOKENIZERS_PARALLELISM"] = "false"
+    env["NCCL_DEBUG"] = "WARN"
+    env["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
+    env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+    train_cmd = [sys.executable, "-m", "torch.distributed.run", "--standalone", "--nnodes=1",
+                 "--nproc_per_node=2", "--module", "mcr.train", "--data-dir", str(data_dir),
+                 "--output-dir", str(output_dir), "--epochs", str(args.epochs),
+                 "--batch-size", str(args.batch_size), "--max-bytes", str(args.max_bytes)]
+    if args.resume or (output_dir / "training_state.pt").exists():
         train_cmd.append("--resume")
-    print("\n=== Starting synchronized 2xT4 QLoRA training ===", flush=True)
+    print("\n=== Starting MCR from-scratch 2xT4 training ===", flush=True)
     subprocess.run(train_cmd, cwd=root, env=env, check=True)
 
-    # The post-training smoke test uses GPU 0 after DDP processes have exited.
-    smoke_env = env.copy()
-    smoke_env["CUDA_VISIBLE_DEVICES"] = "0"
-    print("\n=== Post-training conversational smoke test ===", flush=True)
-    subprocess.run(
-        [
-            sys.executable, str(root / "chat.py"),
-            "--adapter-dir", str(output_dir),
-            "--smoke-test",
-        ],
-        cwd=root,
-        env=smoke_env,
-        check=True,
-    )
-
-    export_path = output_dir.parent / "MCR_ADAPTER.zip"
-    with zipfile.ZipFile(
-        export_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=3
-    ) as archive:
-        for file_path in sorted(output_dir.iterdir()):
-            if file_path.is_file():
-                archive.write(file_path, arcname=file_path.name)
-    print(f"\nFinal adapter export: {export_path}", flush=True)
-    print(
-        "MCR run completed. Save the Kaggle notebook version to preserve output files.",
-        flush=True,
-    )
+    export = Path("/kaggle/working/MCR_MATH_NATIVE.zip")
+    include = ["mcr_model.pt", "mcr_config.json", "mcr_training_report.json",
+               "response_index.npy", "response_bank.jsonl"]
+    with zipfile.ZipFile(export, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=2) as archive:
+        for name in include:
+            path = output_dir / name
+            if not path.exists():
+                raise RuntimeError(f"Training artifact missing: {path}")
+            archive.write(path, arcname=name)
+    print(f"\nFinished. Model export: {export}", flush=True)
+    print("Save a Kaggle Notebook version to preserve MCR_OUTPUT and MCR_MATH_NATIVE.zip.", flush=True)
 
 
 if __name__ == "__main__":
