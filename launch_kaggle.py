@@ -23,7 +23,7 @@ def main():
     p.add_argument("--output-dir", default="/kaggle/working/MCR_OUTPUT")
     p.add_argument("--chat-limit", type=int, default=120_000)
     p.add_argument("--nli-limit", type=int, default=200_000)
-    p.add_argument("--epochs", type=int, default=2)
+    p.add_argument("--epochs", type=int, default=4)
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--max-bytes", type=int, default=512)
     p.add_argument("--resume", action="store_true")
