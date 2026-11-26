@@ -65,7 +65,7 @@ def main():
     env["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
     env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     train_cmd = [sys.executable, "-m", "torch.distributed.run", "--standalone", "--nnodes=1",
-                 "--nproc_per_node=2", str(root / "mcr" / "train.py"), "--data-dir", str(data_dir),
+                 "--nproc_per_node=2", "--module", "mcr.train", "--data-dir", str(data_dir),
                  "--output-dir", str(output_dir), "--epochs", str(args.epochs),
                  "--batch-size", str(args.batch_size), "--max-bytes", str(args.max_bytes)]
     if args.resume or (output_dir / "training_state.pt").exists():
