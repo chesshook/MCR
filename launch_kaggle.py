@@ -75,7 +75,7 @@ def main():
 
     export = Path("/kaggle/working/MCR_MATH_NATIVE.zip")
     include = ["mcr_model.pt", "mcr_config.json", "mcr_training_report.json",
-               "response_context_index.npy", "response_bank.jsonl"]
+               "response_index.npy", "response_bank.jsonl"]
     with zipfile.ZipFile(export, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=2) as archive:
         for name in include:
             path = output_dir / name
