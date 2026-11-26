@@ -10,7 +10,7 @@ MCR is an original, from-scratch neural-symbolic research system for English con
 - A contrastive metric-learning objective aligns conversation contexts with their assistant replies.
 - A three-way semantic-relation head learns entailment, neutral relation, and contradiction from sentence pairs.
 - Chat replies are selected from a paired semantic memory by nearest-neighbour retrieval. There is no decoder and no autoregressive text generation.
-- The default network has approximately 15.1 million trainable parameters.
+- The default network has approximately 28.3 million trainable parameters.
 - Both T4 GPUs train the same model with PyTorch DistributedDataParallel and NCCL gradient all-reduce. Each GPU has its own model replica; VRAM is not pooled.
 
 This is an intentionally different architecture from a conventional generative LLM. UTF-8 bytes are only the numeric input representation; they are not a downloaded token vocabulary or a pretrained language model.
@@ -37,7 +37,7 @@ Default workload:
 
 - Up to 120,000 conversation context/reply pairs.
 - Up to 200,000 entailment/neutral/contradiction examples.
-- 2 epochs, 32 examples per GPU, 384-byte sequence cap.
+- 2 epochs, 32 examples per GPU, 512-byte sequence cap.
 - Mixed FP16 compute, AdamW, cosine schedule, gradient clipping, and resumable checkpoints.
 - Checkpoint: `/kaggle/working/MCR_OUTPUT/training_state.pt`.
 - Final model: `/kaggle/working/MCR_OUTPUT/mcr_model.pt`.
