@@ -10,7 +10,7 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 class ByteSemanticEncoder(nn.Module):
     """Non-autoregressive UTF-8 byte encoder with CNN + bidirectional GRU pooling."""
     def __init__(self, embedding_dim: int = 256, conv_channels: int = 512,
-                 recurrent_hidden: int = 512, output_dim: int = 1024,
+                 recurrent_hidden: int = 768, output_dim: int = 1536,
                  dropout: float = 0.15):
         super().__init__()
         self.output_dim = output_dim
@@ -64,7 +64,7 @@ class ByteSemanticEncoder(nn.Module):
 class MCRModel(nn.Module):
     """Shared semantic space with retrieval and three-way sentence-relation heads."""
     def __init__(self, embedding_dim: int = 256, conv_channels: int = 512,
-                 recurrent_hidden: int = 512, output_dim: int = 1024,
+                 recurrent_hidden: int = 768, output_dim: int = 1536,
                  dropout: float = 0.15):
         super().__init__()
         self.encoder = ByteSemanticEncoder(
@@ -96,6 +96,12 @@ class MCRModel(nn.Module):
 
 
 def contrastive_loss(query: torch.Tensor, reply: torch.Tensor, temperature: float = 0.07) -> torch.Tensor:
+    # Use differentiable all-gather so every query sees replies from both GPUs.
+    # DDP then synchronizes parameter gradients after the global-batch loss.
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        from torch.distributed.nn.functional import all_gather
+        query = torch.cat(all_gather(query), dim=0)
+        reply = torch.cat(all_gather(reply), dim=0)
     logits = (query @ reply.T) / temperature
     labels = torch.arange(logits.shape[0], device=logits.device)
     return 0.5 * (F.cross_entropy(logits, labels) + F.cross_entropy(logits.T, labels))
