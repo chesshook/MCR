@@ -133,12 +133,11 @@ def evaluate_retrieval(model: MCRModel, rows: list[dict], device: torch.device,
 
 def build_response_index(model: MCRModel, rows: list[dict], output_dir: Path,
                          device: torch.device, max_bytes: int) -> None:
-    # Index context vectors rather than answer vectors: a live user turn is matched
-    # against semantically similar conversation states, returning the paired reply.
-    contexts = [row["context"] for row in rows]
+    # Contrastive training aligns context vectors with reply vectors. At inference,
+    # a live context must query this paired-reply index (not a context-vs-context index).
     replies = [row["reply"] for row in rows]
-    embeddings = _encode_texts(model, contexts, device, max_bytes, batch_size=256)
-    np.save(output_dir / "response_context_index.npy", embeddings.astype(np.float16))
+    embeddings = _encode_texts(model, replies, device, max_bytes, batch_size=256)
+    np.save(output_dir / "response_index.npy", embeddings.astype(np.float16))
     with (output_dir / "response_bank.jsonl").open("w", encoding="utf-8") as handle:
         for reply in replies:
             handle.write(json.dumps({"reply": reply}, ensure_ascii=False) + "\n")
