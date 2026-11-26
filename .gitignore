@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.cache/
+data/
+outputs/
+MCR_OUTPUT/
+MCR_TOKENIZED_DATA/
+/kaggle/
+*.log
