@@ -42,7 +42,7 @@ class MCRChat:
         self.model.load_state_dict(state)
         self.model.eval()
         # Convert once at load time; avoid copying the complete index on every turn.
-        self.index = np.asarray(np.load(self.root / "response_context_index.npy"), dtype=np.float32)
+        self.index = np.asarray(np.load(self.root / "response_index.npy"), dtype=np.float32)
         with (self.root / "response_bank.jsonl").open("r", encoding="utf-8") as handle:
             self.responses = [json.loads(line)["reply"] for line in handle if line.strip()]
         if len(self.responses) != self.index.shape[0]:
