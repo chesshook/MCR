@@ -25,7 +25,7 @@ def main():
     p.add_argument("--nli-limit", type=int, default=200_000)
     p.add_argument("--epochs", type=int, default=2)
     p.add_argument("--batch-size", type=int, default=32)
-    p.add_argument("--max-bytes", type=int, default=384)
+    p.add_argument("--max-bytes", type=int, default=512)
     p.add_argument("--resume", action="store_true")
     args = p.parse_args()
 
