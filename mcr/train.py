@@ -150,7 +150,7 @@ def parse_args():
     p.add_argument("--output-dir", required=True)
     p.add_argument("--epochs", type=int, default=2)
     p.add_argument("--batch-size", type=int, default=32, help="Per GPU batch size")
-    p.add_argument("--max-bytes", type=int, default=384)
+    p.add_argument("--max-bytes", type=int, default=512)
     p.add_argument("--learning-rate", type=float, default=2.0e-4)
     p.add_argument("--save-steps", type=int, default=250)
     p.add_argument("--resume", action="store_true")
@@ -313,7 +313,7 @@ def main():
                         "epoch": epoch,
                         "next_task_index": task_index + 1,
                         "global_step": global_step,
-                        "config": {"max_bytes": args.max_bytes, "output_dim": 1024},
+                        "config": {"max_bytes": args.max_bytes, "output_dim": 1536},
                     }, temp_path)
                     temp_path.replace(checkpoint_path)
                 torch.distributed.barrier()
@@ -329,7 +329,7 @@ def main():
                 "epoch": epoch + 1,
                 "next_task_index": 0,
                 "global_step": global_step,
-                "config": {"max_bytes": args.max_bytes, "output_dim": 1024},
+                "config": {"max_bytes": args.max_bytes, "output_dim": 1536},
             }, temp_path)
             temp_path.replace(checkpoint_path)
         torch.distributed.barrier()
@@ -343,7 +343,7 @@ def main():
             "parameters": total_parameters,
             "input": "UTF-8 bytes; zero is padding; ids 1..256 are byte values + 1",
             "max_bytes": args.max_bytes,
-            "output_dim": 1024,
+            "output_dim": 1536,
             "pretrained_weights": False,
             "pretrained_tokenizer": False,
             "autoregressive_decoder": False,
