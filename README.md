@@ -41,7 +41,7 @@ Default workload:
 - Mixed FP16 compute, AdamW, cosine schedule, gradient clipping, and resumable checkpoints.
 - Checkpoint: `/kaggle/working/MCR_OUTPUT/training_state.pt`.
 - Final model: `/kaggle/working/MCR_OUTPUT/mcr_model.pt`.
-- Retrieval memory: `/kaggle/working/MCR_OUTPUT/response_context_index.npy` and `response_bank.jsonl`.
+- Retrieval memory: `/kaggle/working/MCR_OUTPUT/response_index.npy` and `response_bank.jsonl`.
 - Export: `/kaggle/working/MCR_MATH_NATIVE.zip`.
 
 The dataset caps and number of epochs can be changed in the Kaggle cell. A successful run is not the same thing as good comprehension; the report contains held-out metrics.
