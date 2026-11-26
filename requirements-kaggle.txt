@@ -1,0 +1,9 @@
+# Preserve Kaggle's preinstalled PyTorch/CUDA build; do not install torch here.
+transformers==4.55.4
+accelerate==1.10.1
+datasets==3.6.0
+peft==0.17.1
+bitsandbytes==0.47.0
+huggingface_hub>=0.34.0,<1.0
+safetensors>=0.6.0
+sentencepiece>=0.2.0
