@@ -32,7 +32,7 @@ subprocess.run([
     "--output-dir", "/kaggle/working/MCR_OUTPUT",
     "--chat-limit", "120000",
     "--nli-limit", "200000",
-    "--epochs", "2",
+    "--epochs", "4",
     "--batch-size", "32",
     "--max-bytes", "512",
     "--resume",
