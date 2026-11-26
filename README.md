@@ -37,7 +37,7 @@ Default workload:
 
 - Up to 120,000 conversation context/reply pairs.
 - Up to 200,000 entailment/neutral/contradiction examples.
-- 2 epochs, 32 examples per GPU, 512-byte sequence cap.
+- 4 epochs, 32 examples per GPU, 512-byte sequence cap.
 - Mixed FP16 compute, AdamW, cosine schedule, gradient clipping, and resumable checkpoints.
 - Checkpoint: `/kaggle/working/MCR_OUTPUT/training_state.pt`.
 - Final model: `/kaggle/working/MCR_OUTPUT/mcr_model.pt`.
