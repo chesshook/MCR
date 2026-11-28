@@ -4,11 +4,11 @@ from mosaic_features import FEATURE_DIM, extract_features, stable_hash
 
 
 class MosaicFeatureTests(unittest.TestCase):
-    def test_hash_is_deterministic_and_in_range(self):
-        first = stable_hash(b"w:hello")
-        self.assertEqual(first, stable_hash(b"w:hello"))
-        self.assertGreaterEqual(first, 0)
-        self.assertLess(first, FEATURE_DIM)
+    def test_hash_is_deterministic_and_matches_runtime_contract(self):
+        self.assertEqual(stable_hash(b"w:hello"), 47604)
+        self.assertEqual(stable_hash(b"w:hello"), stable_hash(b"w:hello"))
+        self.assertGreaterEqual(stable_hash(b"w:hello"), 0)
+        self.assertLess(stable_hash(b"w:hello"), FEATURE_DIM)
 
     def test_case_normalization_matches(self):
         self.assertEqual(extract_features("HELLO there"), extract_features("hello there"))
