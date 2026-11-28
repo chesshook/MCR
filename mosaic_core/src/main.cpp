@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
                   << "\nContinuing with the native semantic/dialogue core only.\n";
     }
     if (lexicon_path != "-" && !agent.load_lexicon(lexicon_path, &error))
-        std::cerr << "Lexicon unavailable: " << error << "\\nContinuing without dictionary lookup.\\n";
+        std::cerr << "Lexicon unavailable: " << error << "\nContinuing without dictionary lookup.\n";
     if (memory_enabled && !agent.load_memory(memory_path, &error)) {
         std::cerr << "Memory load failed: " << error << '\n';
         return 3;
