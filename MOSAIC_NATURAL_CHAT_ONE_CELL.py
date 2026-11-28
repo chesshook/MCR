@@ -61,7 +61,7 @@ subprocess.run(
         "--standalone", "--nnodes=1", "--nproc_per_node=2",
         "--module", "train",
         "--output-dir", str(OUTPUT),
-        "--epochs", "3",
+        "--epochs", "8",
         "--batch-size", "24",
         "--learning-rate", "0.0018",
         "--max-train-examples", "250000",
