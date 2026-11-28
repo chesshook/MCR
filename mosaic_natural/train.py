@@ -270,6 +270,9 @@ def main():
         train_conversations = train_conversations[validation_count:]
         manifest["fallback_validation_split"] = "2% dialogue-level split from training corpus"
 
+    random.Random(SEED).shuffle(train_conversations)
+    random.Random(SEED + 1).shuffle(validation_conversations)
+    random.Random(SEED + 2).shuffle(test_conversations)
     print(
         f"[rank {rank}] conversations: train={len(train_conversations)} "
         f"validation={len(validation_conversations)} test={len(test_conversations)}",
@@ -299,14 +302,17 @@ def main():
     train_examples = make_response_examples(
         train_conversations, tokenizer,
         max_context=MAX_CONTEXT, max_target=MAX_TARGET,
+        max_examples=args.max_train_examples,
     )
     val_examples = make_response_examples(
         validation_conversations, tokenizer,
         max_context=MAX_CONTEXT, max_target=MAX_TARGET,
+        max_examples=args.max_eval_examples,
     )
     test_examples = make_response_examples(
         test_conversations, tokenizer,
         max_context=MAX_CONTEXT, max_target=MAX_TARGET,
+        max_examples=args.max_eval_examples,
     )
 
     rng = random.Random(SEED)

@@ -211,7 +211,7 @@ def load_conversational_corpora():
 
 
 def make_response_examples(conversations, tokenizer, max_context=352,
-                           max_target=128, max_messages=8):
+                           max_target=128, max_messages=8, max_examples=None):
     from tokenizer import BOS_ID, USER_ID, ASSISTANT_ID, TURN_ID
 
     examples = []
@@ -249,4 +249,6 @@ def make_response_examples(conversations, tokenizer, max_context=352,
             sequence = prefix + [ASSISTANT_ID] + target + [TURN_ID]
             target_start = len(prefix) + 1
             examples.append((sequence, target_start))
+            if max_examples is not None and len(examples) >= max_examples:
+                return examples
     return examples
