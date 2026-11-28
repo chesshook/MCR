@@ -8,13 +8,17 @@ import ipywidgets as widgets
 from IPython.display import display
 
 
-def display_chat(binary, model, memory):
+def display_chat(binary, model, memory, lexicon=None):
     binary = str(Path(binary))
     model = str(Path(model))
     memory = str(Path(memory))
 
+    command = [binary, "--model", model, "--memory", memory]
+    if lexicon and Path(lexicon).is_file():
+        command.extend(["--lexicon", str(Path(lexicon))])
+
     process = subprocess.Popen(
-        [binary, "--model", model, "--memory", memory],
+        command,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
