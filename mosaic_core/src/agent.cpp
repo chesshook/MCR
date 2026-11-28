@@ -699,7 +699,7 @@ std::string Agent::respond(const std::string& message) {
         if (const auto query = lexical_query(tokens)) {
             const auto senses = lexicon_.lookup(query->term, 3);
             if (!senses.empty()) {
-                const auto& sense = *senses.front();
+                const auto& sense = senses.front();
                 if (query->synonyms) {
                     const auto synonyms = first_related_items(sense.synonyms);
                     if (!synonyms.empty())
