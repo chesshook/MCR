@@ -116,7 +116,7 @@ shutil.copytree(ROOT / "mosaic_core", BUNDLE / "mosaic_core",
 for name in [
     "MOSAIC_CHATBOT_README.md", "mosaic_features.py",
     "mosaic_train.py", "mosaic_notebook_chat.py",
-    "mosaic_export_wordnet.py",
+    "mosaic_export_wordnet.py", "build_windows.bat", "run_windows.bat", "LICENSE",
 ]:
     shutil.copy2(ROOT / name, BUNDLE / name)
 shutil.copy2(OUTPUT / "intent_model.mcr", BUNDLE / "intent_model.mcr")
