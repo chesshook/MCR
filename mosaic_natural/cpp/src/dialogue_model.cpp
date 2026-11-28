@@ -9,6 +9,10 @@
 #include <numeric>
 #include <utility>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace mosaic {
 namespace {
 
@@ -354,13 +358,17 @@ bool DialogueModel::step(std::uint32_t token,
 
     logits.resize(vocab_size_);
     const auto& final_hidden = hidden.back();
-    for (std::size_t token_id = 0; token_id < vocab_size_; ++token_id) {
-        const std::size_t base = token_id * hidden_size_;
-        float score = output_bias_[token_id];
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for (std::int64_t token_id = 0;
+         token_id < static_cast<std::int64_t>(vocab_size_); ++token_id) {
+        const std::size_t base = static_cast<std::size_t>(token_id) * hidden_size_;
+        float score = output_bias_[static_cast<std::size_t>(token_id)];
         for (std::size_t j = 0; j < hidden_size_; ++j)
             score += static_cast<float>(embedding_[base + j]) *
                      embedding_scale_ * final_hidden[j];
-        logits[token_id] = score;
+        logits[static_cast<std::size_t>(token_id)] = score;
     }
     return true;
 }

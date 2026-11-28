@@ -6,6 +6,10 @@
 #include <string>
 #include <vector>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace {
 double percentile(std::vector<double> values, double p) {
     if (values.empty()) return 0.0;
@@ -17,6 +21,9 @@ double percentile(std::vector<double> values, double p) {
 }
 
 int main(int argc, char** argv) {
+#ifdef _OPENMP
+    omp_set_num_threads(2);
+#endif
     std::string model_path = "mosaic_dialogue.mos";
     std::size_t iterations = 30;
     for (int i = 1; i < argc; ++i) {

@@ -109,6 +109,8 @@ shutil.copy2(OUTPUT / "mosaic_dialogue.mos", PACKAGE / "mosaic_dialogue.mos")
 shutil.copy2(OUTPUT / "mosaic_dialogue_report.json", PACKAGE / "mosaic_dialogue_report.json")
 shutil.copy2(binary, PACKAGE / binary.name)
 shutil.copy2(benchmark, PACKAGE / benchmark.name)
+shutil.copy2(ROOT / "MCR_BUILD_WINDOWS.cmd", PACKAGE / "MCR_BUILD_WINDOWS.cmd")
+shutil.copy2(ROOT / "RUN_MCR_WINDOWS.cmd", PACKAGE / "RUN_MCR_WINDOWS.cmd")
 
 if ZIP_PATH.exists():
     ZIP_PATH.unlink()

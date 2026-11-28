@@ -8,6 +8,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(mosaic_dialogue STATIC src/dialogue_model.cpp)
 target_include_directories(mosaic_dialogue PUBLIC include)
 
+find_package(OpenMP QUIET)
+if(OpenMP_CXX_FOUND)
+  target_link_libraries(mosaic_dialogue PUBLIC OpenMP::OpenMP_CXX)
+endif()
+
 add_executable(mosaic_natural_chat src/main.cpp)
 target_link_libraries(mosaic_natural_chat PRIVATE mosaic_dialogue)
 

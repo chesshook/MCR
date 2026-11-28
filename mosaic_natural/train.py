@@ -228,7 +228,9 @@ def sample_reply(model, tokenizer, history, device, max_new=70):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", default="/kaggle/working/MCR_NATURAL_OUTPUT")
-    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--epochs", type=int, default=8)
+    parser.add_argument("--no-resume", action="store_false", dest="resume")
+    parser.set_defaults(resume=True)
     parser.add_argument("--batch-size", type=int, default=24)
     parser.add_argument("--learning-rate", type=float, default=0.0018)
     parser.add_argument("--max-train-examples", type=int, default=250000)
@@ -330,6 +332,8 @@ def main():
         )
     if not val_examples:
         raise RuntimeError("No held-out validation examples were produced.")
+    if not test_examples:
+        raise RuntimeError("No held-out test examples were produced.")
 
     print(
         f"[rank {rank}] response examples: train={len(train_examples)} "
@@ -370,11 +374,32 @@ def main():
         output_dir.mkdir(parents=True, exist_ok=True)
     dist.barrier()
 
+    checkpoint_path = output_dir / "mosaic_dialogue_checkpoint.pt"
     best_validation = float("inf")
     best_state = None
     global_step = 0
+    start_epoch = 0
 
-    for epoch in range(args.epochs):
+    if args.resume and checkpoint_path.exists():
+        print(f"[rank {rank}] Resuming checkpoint: {checkpoint_path}", flush=True)
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        ddp.module.load_state_dict(checkpoint["model"])
+        optimizer.load_state_dict(checkpoint["optimizer"])
+        scheduler.load_state_dict(checkpoint["scheduler"])
+        scaler.load_state_dict(checkpoint["scaler"])
+        start_epoch = int(checkpoint["next_epoch"])
+        global_step = int(checkpoint["global_step"])
+        best_validation = float(checkpoint["best_validation"])
+        best_state = checkpoint["best_state"]
+        if start_epoch > args.epochs:
+            raise RuntimeError("Saved checkpoint is from a later epoch count than this run.")
+        print(
+            f"[rank {rank}] Resume epoch={start_epoch + 1}, "
+            f"global_step={global_step}, best_validation={best_validation:.4f}",
+            flush=True,
+        )
+
+    for epoch in range(start_epoch, args.epochs):
         ddp.train()
         sampler.set_epoch(epoch)
         epoch_loss = 0.0
@@ -433,6 +458,29 @@ def main():
                     key: value.detach().cpu().clone()
                     for key, value in ddp.module.state_dict().items()
                 }
+
+            # Save atomically after every completed epoch. A restarted Kaggle
+            # session resumes here rather than losing every earlier epoch.
+            checkpoint_tmp = checkpoint_path.with_suffix(".tmp")
+            torch.save(
+                {
+                    "model": ddp.module.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "scheduler": scheduler.state_dict(),
+                    "scaler": scaler.state_dict(),
+                    "next_epoch": epoch + 1,
+                    "global_step": global_step,
+                    "best_validation": best_validation,
+                    "best_state": best_state,
+                },
+                checkpoint_tmp,
+            )
+            os.replace(checkpoint_tmp, checkpoint_path)
+            print(
+                f"CHECKPOINT_SAVED next_epoch={epoch + 2} "
+                f"global_step={global_step}",
+                flush=True,
+            )
         dist.barrier()
 
     if rank == 0:
@@ -458,7 +506,7 @@ def main():
                 })
 
         model_path = output_dir / "mosaic_dialogue.mos"
-        export_native_model(model_path, ddp.module, tokenizer)
+        export_native_model(model_path, ddp.module, tokenizer, max_context=MAX_CONTEXT)
         report = {
             "architecture": "MOSAIC from-scratch 2-layer recurrent dialogue language model",
             "generator": "GRU causal dialogue model with tied input/output embeddings",
@@ -486,6 +534,7 @@ def main():
             "validation": validation,
             "heldout_test": test,
             "epochs": args.epochs,
+            "resumed_from_epoch": start_epoch,
             "global_optimizer_steps": global_step,
             "world_size": world,
             "per_gpu_batch_size": args.batch_size,

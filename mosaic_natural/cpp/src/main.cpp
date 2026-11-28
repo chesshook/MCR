@@ -8,6 +8,10 @@
 #include <utility>
 #include <vector>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace {
 
 struct Message {
@@ -116,6 +120,9 @@ std::vector<std::uint32_t> make_prompt(
 }  // namespace
 
 int main(int argc, char** argv) {
+#ifdef _OPENMP
+    omp_set_num_threads(2);
+#endif
     std::string model_path = "mosaic_dialogue.mos";
     std::string history_path = "mosaic_history.tsv";
     std::size_t max_new_tokens = 128;

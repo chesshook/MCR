@@ -76,3 +76,16 @@ This model is focused on conversational language: greetings, social turn-taking,
 The training report includes dataset counts, train/validation/test token loss and perplexity, parameter count, quantized artifact size and sample generations. Perplexity measures prediction of held-out text; it does not prove human-level conversational ability. Manual conversation tests are still required.
 
 DailyDialog's CC BY-NC-SA terms impose non-commercial/share-alike conditions. The report preserves this provenance so the resulting model is not silently represented as unrestricted for commercial redistribution.
+
+
+## Run on Windows after Kaggle training
+
+Extract the complete ZIP file on the target PC. Install CMake and a C++17 compiler, then double-click:
+
+    MCR_BUILD_WINDOWS.cmd
+
+After it succeeds, double-click:
+
+    RUN_MCR_WINDOWS.cmd
+
+The native executable runs the baked INT8 model locally. No Python, PyTorch, CUDA or Internet is required for chat. The history file is local to that folder.
