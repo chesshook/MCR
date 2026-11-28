@@ -29,7 +29,7 @@ jobs:
           mkdir -p .ci
           printf 'greeting\tHi\ngreeting\tHello there\nfarewell\tGoodbye\nfarewell\tSee you later\nthanks\tThank you\nthanks\tThanks a lot\n__out_of_scope__\tCalculate the integral of x squared\n__out_of_scope__\tExplain quantum chromodynamics\n' > .ci/train.tsv
           printf 'greeting\tHey there\nfarewell\tBye for now\nthanks\tMany thanks\n__out_of_scope__\tTell me how to build a submarine\n' > .ci/valid.tsv
-          printf 'greeting\tHi\nfarewell\tGoodbye\n' > .ci/test.tsv
+          printf 'greeting\tHi\nfarewell\tGoodbye\nthanks\tThank you\n__out_of_scope__\tInvent a perpetual motion machine\n' > .ci/test.tsv
           python train_intent.py --train .ci/train.tsv --valid .ci/valid.tsv --output .ci/model.txt --epochs 5 --buckets 8191
           python evaluate_intent.py --model .ci/model.txt --test .ci/test.tsv
-          printf 'Hi\n' | ./mcr_intent .ci/model.txt | grep -q '^greeting\t'
+          printf 'Hi\n' | ./mcr_intent .ci/model.txt | grep -q '^greeting'
