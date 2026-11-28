@@ -1,0 +1,25 @@
+name: MOSAIC natural-language chatbot
+
+on:
+  push:
+    branches: [mosaic-natural-chat-v1]
+  pull_request:
+    branches: [mosaic-chatbot-v1, mosaic-cognitive-core]
+  workflow_dispatch:
+
+jobs:
+  native-dialogue-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure native C++ runtime
+        run: cmake -S mosaic_natural/cpp -B build
+      - name: Compile native generator, benchmark and tests
+        run: cmake --build build --parallel 2
+      - name: Verify native model loader, byte fallback and generation stop
+        run: ctest --test-dir build --output-on-failure
+      - name: Compile Python training and notebook code
+        run: python -m py_compile mosaic_natural/tokenizer.py mosaic_natural/data.py mosaic_natural/train.py mosaic_natural/notebook_chat.py MOSAIC_NATURAL_CHAT_ONE_CELL.py
+      - name: Verify tokenizer and conversation-data processing
+        working-directory: mosaic_natural
+        run: python -m unittest discover -s tests -v
