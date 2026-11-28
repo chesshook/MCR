@@ -588,8 +588,9 @@ void Agent::remember(const std::string& predicate, const std::string& value,
                      bool correction) {
     if (value.empty()) return;
     const auto active = state_.query("user", predicate);
-    for (const auto& fact : active) {
-        if (fact.provenance == "user" && fact.value == value) return;
+    if (!active.empty() && active.front().provenance == "user" &&
+        active.front().value == value && (!correction || active.size() == 1)) {
+        return;
     }
 
     Delta delta;
@@ -601,8 +602,21 @@ void Agent::remember(const std::string& predicate, const std::string& value,
     delta.provenance = "user";
     delta.note = correction ? "explicit user correction" : "user statement";
     delta.turn = turn_;
-    if (delta.opcode == OpCode::CorrectFact) delta.fact_id = active.front().id;
-    (void)state_.apply(delta);
+    if (delta.opcode == OpCode::CorrectFact) {
+        delta.fact_id = active.front().id;
+        const auto result = state_.apply(delta);
+        if (!result.ok) return;
+        for (std::size_t i = 1; i < active.size(); ++i) {
+            Delta retract;
+            retract.opcode = OpCode::RetractFact;
+            retract.fact_id = active[i].id;
+            retract.turn = turn_;
+            retract.note = "superseded by explicit correction";
+            (void)state_.apply(retract);
+        }
+    } else {
+        (void)state_.apply(delta);
+    }
 }
 
 std::string Agent::respond(const std::string& message) {
