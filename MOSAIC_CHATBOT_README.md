@@ -46,12 +46,12 @@ Linux:
     ./build/mosaic_chat --model intent_model.mcr --lexicon wordnet.tsv --memory mosaic_memory.tsv
     ./build/mosaic_bench --model intent_model.mcr --iterations 10000
 
-Windows:
+Windows (MinGW-w64):
 
-    cmake -S mosaic_core -B build -DCMAKE_BUILD_TYPE=Release
-    cmake --build build --config Release --parallel 2
-    .\build\Release\mosaic_chat.exe --model intent_model.mcr --memory mosaic_memory.tsv
-    .\build\Release\mosaic_bench.exe --model intent_model.mcr --iterations 10000
+    build_windows.bat
+    run_windows.bat
+
+The Windows script statically links the MinGW C++ runtime and compiles for generic x86-64 (-mtune=generic, without -march=native). It builds and runs the native regression tests before launching. The Linux executable inside the Kaggle ZIP is not a Windows .exe; compile the included source locally on Windows.
 
 The benchmark reports p50 and p95 inference and dialogue-path latency on the machine where it is run. It is single-process and single-threaded, matching the CPU inference target. Record the exact CPU model and compiler when comparing results. No dual-core latency claim is made before measuring on the target computer.
 
