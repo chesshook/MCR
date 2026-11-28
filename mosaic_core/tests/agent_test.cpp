@@ -59,6 +59,8 @@ int main() {
     assert(agent.respond("What do I like?").find("coffee") != std::string::npos);
     agent.respond("Actually, I prefer tea.");
     assert(agent.respond("What do I prefer?").find("tea") != std::string::npos);
+    assert(agent.respond("What do you like?").find("You told me") == std::string::npos);
+    assert(agent.respond("What are you building?").find("Your current project") == std::string::npos);
 
     const std::string memory_path = "mosaic_agent_test_memory.tsv";
     std::string error;
