@@ -1,0 +1,23 @@
+name: MOSAIC core checks
+
+on:
+  push:
+    branches: [mosaic-cognitive-core]
+  pull_request:
+    branches: [mosaic-cognitive-core]
+
+jobs:
+  state-kernel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile MOSAIC demo and tests
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Imosaic_core/include \
+            mosaic_core/src/demo.cpp -o mosaic_demo
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Imosaic_core/include \
+            mosaic_core/tests/state_kernel_test.cpp -o mosaic_kernel_test
+      - name: Verify state-delta semantics
+        run: |
+          ./mosaic_kernel_test
+          ./mosaic_demo
