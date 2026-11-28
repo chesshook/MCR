@@ -11,7 +11,18 @@
 #include <vector>
 
 int main() {
+    const std::string lexicon_path = "mosaic_agent_test_wordnet.tsv";
+    {
+        std::ofstream out(lexicon_path, std::ios::binary | std::ios::trunc);
+        out << "MCR_WORDNET_2025_PLUS_V1\\n";
+        out << "apple\\tn\\ta fruit produced by an apple tree\\torchard apple;malus pumila\\tfruit;edible fruit\\n";
+        out << "dog\\tn\\ta domesticated carnivorous mammal\\tcanis familiaris;domestic dog\\tcanine;domestic animal\\n";
+        assert(out.good());
+    }
+
     mosaic::Agent agent;
+    std::string lexical_error;
+    assert(agent.load_lexicon(lexicon_path, &lexical_error));
 
     const auto greeting = agent.respond("Hi");
     assert(greeting.find("Hi!") == 0);
@@ -37,6 +48,8 @@ int main() {
 
     assert(agent.respond("What is 173 times 29?").find("5017") != std::string::npos);
     assert(agent.respond("How are you?").find("ready") != std::string::npos);
+    assert(agent.respond("What is a dog?").find("domesticated carnivorous mammal") != std::string::npos);
+    assert(agent.respond("Give me synonyms for dog").find("domestic dog") != std::string::npos);
 
     const std::string memory_path = "mosaic_agent_test_memory.tsv";
     std::string error;
@@ -46,6 +59,7 @@ int main() {
     assert(restored.respond("What is my name?").find("Alex") != std::string::npos);
     assert(restored.respond("What am I building?").find("chess engine") != std::string::npos);
     std::remove(memory_path.c_str());
+    std::remove(lexicon_path.c_str());
 
     // Exercise the exact binary format emitted by mosaic_train.py.
     const std::string model_path = "mosaic_intent_test.mcr";
