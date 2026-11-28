@@ -54,7 +54,10 @@ private:
 
     bool step(std::uint32_t token,
               std::vector<std::vector<float>>& hidden,
-              std::vector<float>& logits) const;
+              std::vector<float>& logits,
+              std::vector<float>& layer_input,
+              std::vector<float>& input_gates,
+              std::vector<float>& hidden_gates) const;
 };
 
 }  // namespace mosaic

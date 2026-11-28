@@ -311,17 +311,18 @@ std::string DialogueModel::decode(const std::vector<std::uint32_t>& ids) const {
 
 bool DialogueModel::step(std::uint32_t token,
                          std::vector<std::vector<float>>& hidden,
-                         std::vector<float>& logits) const {
-    if (!loaded_ || token >= vocab_size_ || hidden.size() != layers_) return false;
-    std::vector<float> layer_input(hidden_size_);
+                         std::vector<float>& logits,
+                         std::vector<float>& layer_input,
+                         std::vector<float>& input_gates,
+                         std::vector<float>& hidden_gates) const {
+    if (!loaded_ || token >= vocab_size_ || hidden.size() != layers_ ||
+        layer_input.size() != hidden_size_) return false;
     const std::size_t embedding_offset = static_cast<std::size_t>(token) * hidden_size_;
     for (std::size_t j = 0; j < hidden_size_; ++j)
         layer_input[j] =
             static_cast<float>(embedding_[embedding_offset + j]) * embedding_scale_;
 
     const std::size_t gate_rows = static_cast<std::size_t>(3) * hidden_size_;
-    std::vector<float> input_gates;
-    std::vector<float> hidden_gates;
     for (std::uint32_t layer = 0; layer < layers_; ++layer) {
         const auto& weights = gru_[layer];
         quantized_matvec(weights.weight_ih, weights.scale_ih,
@@ -329,8 +330,10 @@ bool DialogueModel::step(std::uint32_t token,
         quantized_matvec(weights.weight_hh, weights.scale_hh,
                          hidden[layer], gate_rows, hidden_size_, hidden_gates);
 
-        std::vector<float> next(hidden_size_);
+        // Update the recurrent state in place; reuse the same buffers at every token.
+        auto& state = hidden[layer];
         for (std::size_t j = 0; j < hidden_size_; ++j) {
+            const float previous = state[j];
             const float reset = sigmoid(
                 input_gates[j] + weights.bias_ih[j] +
                 hidden_gates[j] + weights.bias_hh[j]);
@@ -344,10 +347,9 @@ bool DialogueModel::step(std::uint32_t token,
                 weights.bias_ih[2 * hidden_size_ + j] +
                 reset * (hidden_gates[2 * hidden_size_ + j] +
                          weights.bias_hh[2 * hidden_size_ + j]));
-            next[j] = (1.0F - update) * candidate + update * hidden[layer][j];
+            state[j] = (1.0F - update) * candidate + update * previous;
         }
-        hidden[layer] = next;
-        layer_input = std::move(next);
+        std::copy(state.begin(), state.end(), layer_input.begin());
     }
 
     logits.resize(vocab_size_);
@@ -379,9 +381,13 @@ std::string DialogueModel::generate(
 
     std::vector<std::vector<float>> hidden(
         layers_, std::vector<float>(hidden_size_, 0.0F));
-    std::vector<float> logits;
+    std::vector<float> logits(vocab_size_);
+    std::vector<float> layer_input(hidden_size_);
+    std::vector<float> input_gates(static_cast<std::size_t>(3) * hidden_size_);
+    std::vector<float> hidden_gates(static_cast<std::size_t>(3) * hidden_size_);
     for (const auto token : bounded_prompt) {
-        if (!step(token, hidden, logits)) return {};
+        if (!step(token, hidden, logits, layer_input, input_gates, hidden_gates))
+            return {};
     }
 
     if (seed == 0) {
@@ -401,7 +407,7 @@ std::string DialogueModel::generate(
         generated.push_back(next);
         recent.push_back(next);
         if (recent.size() > 32) recent.erase(recent.begin());
-        if (!step(next, hidden, logits)) break;
+        if (!step(next, hidden, logits, layer_input, input_gates, hidden_gates)) break;
     }
 
     std::string reply = decode(generated);

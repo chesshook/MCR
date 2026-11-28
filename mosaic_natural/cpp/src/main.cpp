@@ -156,13 +156,13 @@ int main(int argc, char** argv) {
         return 4;
     }
 
-    std::cout << "MOSAIC natural-language chat is ready. Type /help for commands.\n";
+    std::cout << "MOSAIC natural-language chat is ready. Type /help for commands.\n" << std::flush;
     std::string input;
     while (std::getline(std::cin, input)) {
         if (input == "/exit" || input == "/quit") break;
         if (input == "/help") {
             std::cout << "Commands: /help, /reset, /exit. "
-                         "This model generates replies from its baked conversation weights.\n";
+                         "This model generates replies from its baked conversation weights.\n" << std::flush;
             continue;
         }
         if (input == "/reset") {
@@ -171,11 +171,11 @@ int main(int argc, char** argv) {
                 std::cerr << "Could not save empty conversation history.\n";
                 return 5;
             }
-            std::cout << "MCR> Conversation history cleared.\n";
+            std::cout << "MCR> Conversation history cleared.\n" << std::flush;
             continue;
         }
         if (input.empty()) {
-            std::cout << "MCR> " << '\n';
+            std::cout << "MCR> " << '\n' << std::flush;
             continue;
         }
 
@@ -183,7 +183,7 @@ int main(int argc, char** argv) {
         const std::string reply = model.generate(
             prompt, max_new_tokens, temperature, top_p, 48
         );
-        std::cout << "MCR> " << reply << '\n';
+        std::cout << "MCR> " << reply << '\n' << std::flush;
 
         history.push_back({false, input});
         history.push_back({true, reply});
