@@ -25,12 +25,12 @@ int main() {
 
     const auto apple = lexicon.lookup("Apple");
     assert(apple.size() == 2);
-    assert(apple.front()->definition.find("fruit") != std::string::npos);
-    assert(apple.front()->synonyms.find("orchard apple") != std::string::npos);
+    assert(apple.front().definition.find("fruit") != std::string::npos);
+    assert(apple.front().synonyms.find("orchard apple") != std::string::npos);
 
     const auto dog = lexicon.lookup("dog");
     assert(dog.size() == 1);
-    assert(dog.front()->hypernyms.find("canine") != std::string::npos);
+    assert(dog.front().hypernyms.find("canine") != std::string::npos);
     assert(lexicon.lookup("unknownword").empty());
 
     std::remove(path.c_str());
