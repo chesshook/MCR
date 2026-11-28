@@ -203,7 +203,8 @@ std::optional<std::pair<std::string, std::string>> capture_profile_fact(
 
 std::optional<std::string> profile_query_predicate(
     const std::vector<TokenSpan>& tokens) {
-    if (tokens.empty()) return std::nullopt;
+    if (tokens.empty() || has_token(tokens, "you") ||
+        (!has_token(tokens, "i") && !has_token(tokens, "my"))) return std::nullopt;
     for (const auto& adjective : {std::string("favorite"), std::string("favourite")}) {
         const auto position = find_sequence(tokens, {"my", adjective});
         if (position) {
@@ -312,7 +313,7 @@ bool is_project_question(const std::vector<TokenSpan>& tokens) {
     const bool subject = has_token(tokens, "project") || has_token(tokens, "building") ||
                          has_token(tokens, "making") || has_token(tokens, "developing") ||
                          has_token(tokens, "working");
-    return asks && subject && !has_token(tokens, "your");
+    return asks && subject && !has_token(tokens, "your") && !has_token(tokens, "you");
 }
 
 struct LexicalQuery {
