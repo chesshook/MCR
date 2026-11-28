@@ -14,7 +14,8 @@ This branch turns the MOSAIC state kernel into a small, runnable conversational 
 - Explicit correction handling, e.g. "Actually, I'm building a chess engine."
 - Local memory save/load. The chat can continue across process restarts on the same machine.
 - Offline Open English WordNet 2025+ meanings, synonyms and immediate hypernyms, loaded from a contiguous read-only buffer with a 32-bit offset index.
-- C++ and Python tests, including binary model-format and lexical-query tests.
+- Multi-turn regression tests for identity, project, location, favorites, preferences, explicit corrections, persisted memory, arithmetic, dictionary definitions and synonyms.
+- C++ and Python tests, including binary model-format, lexical-query and WordNet exporter-contract tests.
 
 The intent classifier uses CLINC150 plus (150 in-scope intents and an out-of-scope class) and learns from random initialization. The Kaggle bake also downloads Open English WordNet 2025+ and compiles its definitions and lexical relations into a local TSV asset. Open English WordNet is released under CC BY 4.0; preserve attribution to the Global WordNet Association and Princeton WordNet. The Hugging Face `clinc/clinc_oos` card declares CC BY 3.0, while the canonical UCI CLINC150 record lists CC BY 4.0; the bake records this source distinction, and redistribution should preserve attribution and verify the terms of the exact downloaded source. No pretrained LLM, tokenizer, word vectors or generative model is used.
 
@@ -29,7 +30,7 @@ The lexical database can answer dictionary-style definition and synonym question
 1. Create a Kaggle notebook, select GPU T4 x2, and enable Internet.
 2. Run the complete MOSAIC_KAGGLE_ONE_CELL.py in one cell.
 3. The cell checks the two T4 GPUs, loads `clinc/clinc_oos` plus, trains an EmbeddingBag linear classifier from random initialization with two-process NCCL DDP, evaluates on the supplied validation and test splits, and exports the classifier to int8.
-4. It downloads Open English WordNet 2025+, builds `wordnet.tsv`, compiles and tests the C++17 runtime, and exports `MCR_MOSAIC_CPU.zip`.
+4. It downloads Open English WordNet 2025+, builds `wordnet.tsv`, compiles and tests the C++17 runtime, and exports `MCR_MOSAIC_CPU.zip` with both Linux runtime artifacts and the C++ source plus MinGW Windows build scripts.
 5. Save a Kaggle notebook version to preserve the output files.
 
 The two T4s are used for offline baking only. The exported C++ runtime does not require CUDA, Python, or network access. The classifier is intentionally small: 65,536 hashed features × 151 output classes before int8 quantization. It is an intent classifier, not a language generator. WordNet definitions are a static lexical resource, not learned world knowledge.
