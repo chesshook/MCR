@@ -51,6 +51,15 @@ int main() {
     assert(agent.respond("What is a dog?").find("domesticated carnivorous mammal") != std::string::npos);
     assert(agent.respond("Give me synonyms for dog").find("domestic dog") != std::string::npos);
 
+    assert(agent.respond("I live in Ludhiana.").find("Ludhiana") != std::string::npos);
+    assert(agent.respond("Where do I live?").find("Ludhiana") != std::string::npos);
+    assert(agent.respond("My favorite color is blue.").find("blue") != std::string::npos);
+    assert(agent.respond("What is my favorite color?").find("blue") != std::string::npos);
+    agent.respond("I like coffee.");
+    assert(agent.respond("What do I like?").find("coffee") != std::string::npos);
+    agent.respond("Actually, I prefer tea.");
+    assert(agent.respond("What do I prefer?").find("tea") != std::string::npos);
+
     const std::string memory_path = "mosaic_agent_test_memory.tsv";
     std::string error;
     assert(agent.save_memory(memory_path, &error));
@@ -58,6 +67,8 @@ int main() {
     assert(restored.load_memory(memory_path, &error));
     assert(restored.respond("What is my name?").find("Alex") != std::string::npos);
     assert(restored.respond("What am I building?").find("chess engine") != std::string::npos);
+    assert(restored.respond("Where do I live?").find("Ludhiana") != std::string::npos);
+    assert(restored.respond("What is my favorite color?").find("blue") != std::string::npos);
     std::remove(memory_path.c_str());
     std::remove(lexicon_path.c_str());
 
