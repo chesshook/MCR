@@ -1,0 +1,22 @@
+name: MOSAIC native chatbot
+
+on:
+  push:
+    branches: [mosaic-chatbot-v1]
+  pull_request:
+    branches: [mosaic-cognitive-core, math-native-v1]
+  workflow_dispatch:
+
+jobs:
+  native-and-python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure native runtime
+        run: cmake -S mosaic_core -B build
+      - name: Compile runtime and tests
+        run: cmake --build build --parallel 2
+      - name: Run C++ semantic and dialogue tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Run feature extractor tests
+        run: python -m unittest discover -s tests -v
