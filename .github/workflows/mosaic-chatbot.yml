@@ -16,9 +16,9 @@ jobs:
         run: cmake -S mosaic_core -B build
       - name: Compile runtime and tests
         run: cmake --build build --parallel 2
-      - name: Run C++ semantic, binary-model and dialogue tests
+      - name: Run C++ state, binary-model, dialogue and lexical tests
         run: ctest --test-dir build --output-on-failure
       - name: Compile all Python entry points
-        run: python -m py_compile mosaic_features.py mosaic_train.py mosaic_notebook_chat.py MOSAIC_KAGGLE_ONE_CELL.py
+        run: python -m py_compile mosaic_features.py mosaic_train.py mosaic_notebook_chat.py mosaic_export_wordnet.py MOSAIC_KAGGLE_ONE_CELL.py
       - name: Run feature extractor tests
         run: python -m unittest discover -s tests -v
