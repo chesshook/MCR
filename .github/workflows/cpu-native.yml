@@ -1,0 +1,35 @@
+name: CPU-native MCR checks
+
+on:
+  push:
+    branches: [cpu-native-v2]
+  pull_request:
+    branches: [cpu-native-v2]
+
+jobs:
+  cpu-native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Python syntax and unit tests
+        working-directory: cpu_native
+        run: |
+          python -m py_compile train_intent.py prepare_clinc.py evaluate_intent.py
+          python -m unittest discover -s tests -v
+      - name: Compile C++17 inference runtime
+        working-directory: cpu_native
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic src/main.cpp -o mcr_intent
+      - name: Train a tiny integration fixture and verify C++ model loading
+        working-directory: cpu_native
+        run: |
+          mkdir -p .ci
+          printf 'greeting\tHi\ngreeting\tHello there\nfarewell\tGoodbye\nfarewell\tSee you later\nthanks\tThank you\nthanks\tThanks a lot\n__out_of_scope__\tCalculate the integral of x squared\n__out_of_scope__\tExplain quantum chromodynamics\n' > .ci/train.tsv
+          printf 'greeting\tHey there\nfarewell\tBye for now\nthanks\tMany thanks\n__out_of_scope__\tTell me how to build a submarine\n' > .ci/valid.tsv
+          printf 'greeting\tHi\nfarewell\tGoodbye\n' > .ci/test.tsv
+          python train_intent.py --train .ci/train.tsv --valid .ci/valid.tsv --output .ci/model.txt --epochs 5 --buckets 8191
+          python evaluate_intent.py --model .ci/model.txt --test .ci/test.tsv
+          printf 'Hi\n' | ./mcr_intent .ci/model.txt | grep -q '^greeting\t'
