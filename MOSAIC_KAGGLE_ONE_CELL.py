@@ -38,9 +38,14 @@ for device_id in range(2):
     if "T4" not in device_name.upper():
         raise RuntimeError(f"Expected a Tesla T4 at GPU {device_id}, found {device_name}")
 
+packages_to_install = []
 if importlib.util.find_spec("datasets") is None:
+    packages_to_install.append("datasets>=3.6,<5")
+if importlib.util.find_spec("wn") is None:
+    packages_to_install.append("wn==1.1.1")
+if packages_to_install:
     subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-q", "datasets>=3.6,<5"],
+        [sys.executable, "-m", "pip", "install", "-q", *packages_to_install],
         check=True,
     )
 
@@ -61,6 +66,15 @@ subprocess.run(
         "--batch-size", "128",
         "--learning-rate", "0.025",
     ],
+    cwd=ROOT,
+    env=env,
+    check=True,
+)
+
+print("\n=== EXPORTING OPEN ENGLISH WORDNET 2025+ ===", flush=True)
+subprocess.run(
+    [sys.executable, str(ROOT / "mosaic_export_wordnet.py"),
+     "--output-dir", str(OUTPUT), "--max-senses", "4"],
     cwd=ROOT,
     env=env,
     check=True,
@@ -102,10 +116,13 @@ shutil.copytree(ROOT / "mosaic_core", BUNDLE / "mosaic_core",
 for name in [
     "MOSAIC_CHATBOT_README.md", "mosaic_features.py",
     "mosaic_train.py", "mosaic_notebook_chat.py",
+    "mosaic_export_wordnet.py",
 ]:
     shutil.copy2(ROOT / name, BUNDLE / name)
 shutil.copy2(OUTPUT / "intent_model.mcr", BUNDLE / "intent_model.mcr")
 shutil.copy2(OUTPUT / "intent_report.json", BUNDLE / "intent_report.json")
+shutil.copy2(OUTPUT / "wordnet.tsv", BUNDLE / "wordnet.tsv")
+shutil.copy2(OUTPUT / "wordnet_manifest.json", BUNDLE / "wordnet_manifest.json")
 shutil.copy2(binary, BUNDLE / binary.name)
 shutil.copy2(benchmark, BUNDLE / benchmark.name)
 
@@ -132,4 +149,5 @@ display_chat(
     binary=str(binary),
     model=str(BUNDLE / "intent_model.mcr"),
     memory="/kaggle/working/MOSAIC_MEMORY.tsv",
+    lexicon=str(BUNDLE / "wordnet.tsv"),
 )
