@@ -85,6 +85,15 @@ binary = next((candidate for candidate in binary_candidates if candidate.exists(
 if binary is None:
     raise FileNotFoundError("CMake completed but mosaic_chat executable was not found.")
 
+bench_candidates = [
+    BUILD / "mosaic_bench",
+    BUILD / "Release" / "mosaic_bench.exe",
+    BUILD / "mosaic_bench.exe",
+]
+benchmark = next((candidate for candidate in bench_candidates if candidate.exists()), None)
+if benchmark is None:
+    raise FileNotFoundError("CMake completed but mosaic_bench executable was not found.")
+
 if BUNDLE.exists():
     shutil.rmtree(BUNDLE)
 BUNDLE.mkdir(parents=True)
@@ -98,6 +107,7 @@ for name in [
 shutil.copy2(OUTPUT / "intent_model.mcr", BUNDLE / "intent_model.mcr")
 shutil.copy2(OUTPUT / "intent_report.json", BUNDLE / "intent_report.json")
 shutil.copy2(binary, BUNDLE / binary.name)
+shutil.copy2(benchmark, BUNDLE / benchmark.name)
 
 if ZIP_PATH.exists():
     ZIP_PATH.unlink()
@@ -110,6 +120,7 @@ print("\n=== BAKING RESULT ===")
 print((OUTPUT / "intent_report.json").read_text(encoding="utf-8"))
 print(f"Quantized intent model: {(OUTPUT / 'intent_model.mcr').stat().st_size / 1024**2:.2f} MiB")
 print(f"Native executable: {binary}")
+print(f"Native benchmark: {benchmark}")
 print(f"Package: {ZIP_PATH} ({ZIP_PATH.stat().st_size / 1024**2:.2f} MiB)")
 print("Inference runs in native C++; the two GPUs are not needed after this point.")
 
