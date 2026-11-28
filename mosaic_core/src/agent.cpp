@@ -187,6 +187,91 @@ bool is_project_question(const std::vector<TokenSpan>& tokens) {
     return asks && subject && !has_token(tokens, "your");
 }
 
+struct LexicalQuery {
+    std::string term;
+    bool synonyms = false;
+};
+
+std::optional<LexicalQuery> lexical_query(const std::vector<TokenSpan>& tokens) {
+    if (tokens.empty()) return std::nullopt;
+    std::size_t begin = tokens.size();
+    std::size_t end = tokens.size();
+    bool synonyms = false;
+
+    if (tokens.front().value == "define" && tokens.size() > 1) {
+        begin = 1;
+    } else if (tokens.front().value == "meaning" && tokens.size() > 2 &&
+               tokens[1].value == "of") {
+        begin = 2;
+    } else if (tokens.front().value == "what" && tokens.size() > 3 &&
+               tokens[1].value == "does" && tokens.back().value == "mean") {
+        begin = 2;
+        end = tokens.size() - 1;
+    } else if (tokens.front().value == "what" && tokens.size() > 2 &&
+               tokens[1].value == "is") {
+        if (tokens.size() > 5 && tokens[2].value == "the" &&
+            tokens[3].value == "definition" && tokens[4].value == "of") {
+            begin = 5;
+        } else if (tokens.size() > 5 && tokens[2].value == "the" &&
+                   tokens[3].value == "meaning" && tokens[4].value == "of") {
+            begin = 5;
+        } else {
+            begin = 2;
+        }
+    } else {
+        for (std::size_t i = 0; i < tokens.size(); ++i) {
+            if ((tokens[i].value == "synonyms" || tokens[i].value == "synonym") &&
+                i + 1 < tokens.size()) {
+                std::size_t separator = i + 1;
+                while (separator < tokens.size() &&
+                       tokens[separator].value != "for" &&
+                       tokens[separator].value != "of") ++separator;
+                if (separator + 1 < tokens.size()) {
+                    begin = separator + 1;
+                    synonyms = true;
+                }
+                break;
+            }
+        }
+    }
+
+    if (begin >= tokens.size()) return std::nullopt;
+    if (end == tokens.size()) end = tokens.size();
+    if (begin < end && (tokens[begin].value == "a" ||
+                        tokens[begin].value == "an" ||
+                        tokens[begin].value == "the")) ++begin;
+    while (end > begin && (tokens[end - 1].value == "please" ||
+                           tokens[end - 1].value == "thanks")) --end;
+    if (end <= begin || end - begin > 5) return std::nullopt;
+
+    std::string term;
+    for (std::size_t i = begin; i < end; ++i) {
+        if (!term.empty()) term.push_back(' ');
+        term += tokens[i].value;
+    }
+    if (term.empty()) return std::nullopt;
+    return LexicalQuery{std::move(term), synonyms};
+}
+
+std::string first_related_items(const std::string& list, std::size_t limit = 5) {
+    std::string result;
+    std::size_t begin = 0;
+    std::size_t count = 0;
+    while (begin < list.size() && count < limit) {
+        const auto end = list.find(';', begin);
+        const auto item = list.substr(begin, end == std::string::npos
+            ? std::string::npos : end - begin);
+        if (!item.empty()) {
+            if (!result.empty()) result += ", ";
+            result += item;
+            ++count;
+        }
+        if (end == std::string::npos) break;
+        begin = end + 1;
+    }
+    return result;
+}
+
 class ExpressionParser {
 public:
     explicit ExpressionParser(const std::string& expression) : text_(expression) {}
@@ -367,6 +452,10 @@ bool Agent::load_intent_model(const std::string& path, std::string* error) {
     return intent_model_.load(path, error);
 }
 
+bool Agent::load_lexicon(const std::string& path, std::string* error) {
+    return lexicon_.load(path, error);
+}
+
 void Agent::remember(const std::string& predicate, const std::string& value,
                      bool correction) {
     if (value.empty()) return;
@@ -451,6 +540,32 @@ std::string Agent::respond(const std::string& message) {
     if (has_token(tokens, "what") && has_token(tokens, "can") &&
         (has_token(tokens, "do") || has_token(tokens, "ask"))) {
         return "You can tell me facts to remember, correct earlier details, ask questions about our conversation, or give me arithmetic to solve. My broader knowledge and language skills are still limited.";
+    }
+
+    if (lexicon_.loaded()) {
+        if (const auto query = lexical_query(tokens)) {
+            const auto senses = lexicon_.lookup(query->term, 3);
+            if (!senses.empty()) {
+                const auto& sense = *senses.front();
+                if (query->synonyms) {
+                    const auto synonyms = first_related_items(sense.synonyms);
+                    if (!synonyms.empty())
+                        return "Some synonyms for " + query->term + " are " + synonyms + ".";
+                    return "I found " + query->term + " in my dictionary, but this sense has no listed synonyms.";
+                }
+                std::string answer = "In Open English WordNet, " + query->term +
+                    " (" + sense.pos + ") means: " + sense.definition;
+                if (!sense.synonyms.empty())
+                    answer += " Related words: " + first_related_items(sense.synonyms) + ".";
+                if (!sense.hypernyms.empty())
+                    answer += " A broader category is: " + first_related_items(sense.hypernyms, 3) + ".";
+                if (senses.size() > 1)
+                    answer += " The word also has other recorded senses.";
+                return answer;
+            }
+            return "I don't have a local WordNet entry for " + query->term +
+                ". I won't invent a definition.";
+        }
     }
 
     if (const auto result = evaluate_arithmetic(message)) {
