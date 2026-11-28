@@ -323,6 +323,12 @@ struct LexicalQuery {
 
 std::optional<LexicalQuery> lexical_query(const std::vector<TokenSpan>& tokens) {
     if (tokens.empty()) return std::nullopt;
+    // Numeric expressions belong to the arithmetic parser, not the dictionary.
+    for (const auto& token : tokens) {
+        if (std::any_of(token.value.begin(), token.value.end(),
+                        [](unsigned char c) { return std::isdigit(c) != 0; }))
+            return std::nullopt;
+    }
     std::size_t begin = tokens.size();
     std::size_t end = tokens.size();
     bool synonyms = false;
