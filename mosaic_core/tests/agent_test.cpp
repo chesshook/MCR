@@ -14,9 +14,9 @@ int main() {
     const std::string lexicon_path = "mosaic_agent_test_wordnet.tsv";
     {
         std::ofstream out(lexicon_path, std::ios::binary | std::ios::trunc);
-        out << "MCR_WORDNET_2025_PLUS_V1\\n";
-        out << "apple\\tn\\ta fruit produced by an apple tree\\torchard apple;malus pumila\\tfruit;edible fruit\\n";
-        out << "dog\\tn\\ta domesticated carnivorous mammal\\tcanis familiaris;domestic dog\\tcanine;domestic animal\\n";
+        out << "MCR_WORDNET_2025_PLUS_V1\n";
+        out << "apple\tn\ta fruit produced by an apple tree\torchard apple;malus pumila\tfruit;edible fruit\n";
+        out << "dog\tn\ta domesticated carnivorous mammal\tcanis familiaris;domestic dog\tcanine;domestic animal\n";
         assert(out.good());
     }
 
