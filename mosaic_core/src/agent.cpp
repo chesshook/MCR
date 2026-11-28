@@ -149,6 +149,134 @@ std::optional<std::string> capture_project(
     return best->second;
 }
 
+std::optional<std::pair<std::string, std::string>> capture_profile_fact(
+    const std::string& input, const std::vector<TokenSpan>& tokens) {
+    const std::vector<std::pair<std::vector<std::string>, std::string>> patterns = {
+        {{"i", "don", "t", "like"}, "dislikes"},
+        {{"i", "do", "not", "like"}, "dislikes"},
+        {{"i", "dislike"}, "dislikes"},
+        {{"i", "hate"}, "dislikes"},
+        {{"i", "live", "in"}, "location"},
+        {{"i", "am", "from"}, "origin"},
+        {{"i", "m", "from"}, "origin"},
+        {{"i", "work", "as"}, "occupation"},
+        {{"i", "am", "studying"}, "study_subject"},
+        {{"i", "m", "studying"}, "study_subject"},
+        {{"i", "study"}, "study_subject"},
+        {{"i", "prefer"}, "preference"},
+        {{"i", "enjoy"}, "preference"},
+        {{"i", "love"}, "preference"},
+        {{"i", "like"}, "preference"},
+        {{"my", "hobby", "is"}, "hobby"},
+        {{"my", "goal", "is"}, "goal"}
+    };
+
+    for (const auto& item : patterns) {
+        const auto position = find_sequence(tokens, item.first);
+        if (!position) continue;
+        const std::size_t after = *position + item.first.size();
+        const auto value = capture_after(input, tokens, after, 8, true);
+        if (!value.empty()) return std::make_pair(item.second, value);
+    }
+
+    for (const auto& adjective : {std::string("favorite"), std::string("favourite")}) {
+        const auto position = find_sequence(tokens, {"my", adjective});
+        if (!position) continue;
+        std::size_t cursor = *position + 2;
+        std::string category;
+        std::size_t category_words = 0;
+        while (cursor < tokens.size() && tokens[cursor].value != "is" &&
+               category_words < 3) {
+            if (!category.empty()) category.push_back('_');
+            category += tokens[cursor].value;
+            ++cursor;
+            ++category_words;
+        }
+        if (category.empty() || cursor >= tokens.size() || tokens[cursor].value != "is")
+            continue;
+        const auto value = capture_after(input, tokens, cursor + 1, 8, true);
+        if (!value.empty())
+            return std::make_pair("favorite_" + category, value);
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> profile_query_predicate(
+    const std::vector<TokenSpan>& tokens) {
+    if (tokens.empty()) return std::nullopt;
+    for (const auto& adjective : {std::string("favorite"), std::string("favourite")}) {
+        const auto position = find_sequence(tokens, {"my", adjective});
+        if (position) {
+            std::string category;
+            for (std::size_t i = *position + 2; i < tokens.size() && i < *position + 5; ++i) {
+                if (!category.empty()) category.push_back('_');
+                category += tokens[i].value;
+            }
+            return category.empty()
+                ? std::optional<std::string>("favorite")
+                : std::optional<std::string>("favorite_" + category);
+        }
+    }
+    if (has_token(tokens, "where") && has_token(tokens, "live")) return "location";
+    if (has_token(tokens, "where") && has_token(tokens, "from")) return "origin";
+    if (has_token(tokens, "what") && has_token(tokens, "like")) return "preference";
+    if (has_token(tokens, "what") && has_token(tokens, "prefer")) return "preference";
+    if (has_token(tokens, "what") && has_token(tokens, "hobby")) return "hobby";
+    if (has_token(tokens, "what") && has_token(tokens, "goal")) return "goal";
+    if (has_token(tokens, "what") &&
+        (has_token(tokens, "job") || has_token(tokens, "occupation") ||
+         has_token(tokens, "work"))) return "occupation";
+    if (has_token(tokens, "what") &&
+        (has_token(tokens, "study") || has_token(tokens, "studying"))) return "study_subject";
+    if (has_token(tokens, "what") && has_token(tokens, "dislike")) return "dislikes";
+    return std::nullopt;
+}
+
+std::string profile_confirmation(const std::string& predicate,
+                                 const std::string& value,
+                                 bool correction) {
+    const std::string prefix = correction ? "Understood. " : "Got it. ";
+    if (predicate == "location")
+        return prefix + "I'll remember that you live in " + value + ".";
+    if (predicate == "origin")
+        return prefix + "I'll remember that you're from " + value + ".";
+    if (predicate == "occupation")
+        return prefix + "I'll remember that you work as " + value + ".";
+    if (predicate == "preference")
+        return prefix + "I'll remember that you like " + value + ".";
+    if (predicate == "dislikes")
+        return prefix + "I'll remember that you dislike " + value + ".";
+    if (predicate == "hobby")
+        return prefix + "I'll remember that your hobby is " + value + ".";
+    if (predicate == "goal")
+        return prefix + "I'll remember that your goal is " + value + ".";
+    if (predicate == "study_subject")
+        return prefix + "I'll remember that you're studying " + value + ".";
+    if (predicate.rfind("favorite_", 0) == 0) {
+        std::string category = predicate.substr(9);
+        std::replace(category.begin(), category.end(), '_', ' ');
+        return prefix + "I'll remember that your favorite " + category + " is " + value + ".";
+    }
+    return prefix + "I'll remember that detail.";
+}
+
+std::string profile_answer(const std::string& predicate, const std::string& value) {
+    if (predicate == "location") return "You told me you live in " + value + ".";
+    if (predicate == "origin") return "You told me you're from " + value + ".";
+    if (predicate == "occupation") return "You told me you work as " + value + ".";
+    if (predicate == "preference") return "You told me you like " + value + ".";
+    if (predicate == "dislikes") return "You told me you dislike " + value + ".";
+    if (predicate == "hobby") return "You told me your hobby is " + value + ".";
+    if (predicate == "goal") return "You told me your goal is " + value + ".";
+    if (predicate == "study_subject") return "You told me you're studying " + value + ".";
+    if (predicate.rfind("favorite_", 0) == 0) {
+        std::string category = predicate.substr(9);
+        std::replace(category.begin(), category.end(), '_', ' ');
+        return "You told me your favorite " + category + " is " + value + ".";
+    }
+    return "You haven't told me that yet.";
+}
+
 bool is_greeting(const std::vector<TokenSpan>& tokens) {
     if (tokens.empty()) return false;
     const auto& first = tokens.front().value;
@@ -498,6 +626,11 @@ std::string Agent::respond(const std::string& message) {
             : "That sounds interesting. You're working on " + *project + ".";
     }
 
+    if (const auto profile = capture_profile_fact(message, tokens)) {
+        remember(profile->first, profile->second, correction);
+        return profile_confirmation(profile->first, profile->second, correction);
+    }
+
     if (has_token(tokens, "name") && has_token(tokens, "your")) {
         return "I'm MCR, a compact conversational system built around explicit meaning, memory and reasoning.";
     }
@@ -514,6 +647,12 @@ std::string Agent::respond(const std::string& message) {
         if (!facts.empty())
             return "Your current project is " + facts.front().value + ".";
         return "You haven't told me what you're building yet. What is the project?";
+    }
+
+    if (const auto predicate = profile_query_predicate(tokens)) {
+        const auto facts = state_.query("user", *predicate);
+        if (!facts.empty()) return profile_answer(*predicate, facts.front().value);
+        return "You haven't told me that yet.";
     }
 
     if (is_greeting(tokens)) {
