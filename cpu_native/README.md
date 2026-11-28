@@ -56,13 +56,17 @@ python train_intent.py \
 
 The validation split selects an abstention margin to meet the requested selective accuracy when possible. Inspect both validation accuracy and coverage: a model that only answers a tiny fraction of queries is not useful.
 
-Evaluate separately on the untouched test split; do not tune on test:
+Evaluate once on the untouched test split; do not tune on test:
 
 \`\`\`bash
 python evaluate_intent.py --model artifacts/intent_model.txt --test data/clinc150/test.tsv
 \`\`\`
 
-(The independent test evaluator is a follow-up task; the trainer only reports validation metrics.)
+Run the feature-unit tests:
+
+\`\`\`bash
+python -m unittest discover -s tests -v
+\`\`\`
 
 ## Run the C++ module
 
@@ -76,6 +80,6 @@ Enter one sentence per line. The output is an intent hypothesis. It deliberately
 
 - English-only first pass.
 - Character feature hashing is byte-based UTF-8; it is not Unicode linguistic analysis.
-- This model classifies one primary intent; mixed-intent utterances need a later multi-label layer.
+- This first model predicts one primary intent; mixed-intent utterances need a later multi-label layer.
 - CLINC150 is narrow and cannot establish general conversation ability.
 - No sentence parser, semantic frame builder, memory manager, reasoning engine or response generator is implemented here yet.
