@@ -73,6 +73,8 @@ int main() {
     const auto unknown = model.encode("Sanjay");
     assert(!unknown.empty());
     assert(model.decode(unknown) == "Sanjay");
+    const std::vector<std::uint32_t> invalid_utf8 = {5U + 0xFFU};
+    assert(model.decode(invalid_utf8) == "\\xEF\\xBF\\xBD");
 
     const std::vector<std::uint32_t> prompt = {1, 2, 261, 4, 3};
     const auto reply = model.generate(prompt, 8, 0.8F, 0.9F, 48, 7);

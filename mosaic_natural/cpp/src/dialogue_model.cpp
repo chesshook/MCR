@@ -143,6 +143,49 @@ std::uint32_t sample_token(const std::vector<float>& logits,
     return candidates[distribution(random)].id;
 }
 
+std::string sanitize_utf8(const std::string& input) {
+    static const std::string replacement = "\xEF\xBF\xBD";
+    std::string output;
+    output.reserve(input.size());
+    std::size_t i = 0;
+    while (i < input.size()) {
+        const auto first = static_cast<unsigned char>(input[i]);
+        if (first <= 0x7F) {
+            output.push_back(input[i++]);
+            continue;
+        }
+        std::size_t length = 0;
+        if (first >= 0xC2 && first <= 0xDF) length = 2;
+        else if (first >= 0xE0 && first <= 0xEF) length = 3;
+        else if (first >= 0xF0 && first <= 0xF4) length = 4;
+        bool valid = length != 0 && i + length <= input.size();
+        if (valid) {
+            for (std::size_t j = 1; j < length; ++j) {
+                const auto next = static_cast<unsigned char>(input[i + j]);
+                if ((next & 0xC0) != 0x80) { valid = false; break; }
+            }
+        }
+        if (valid && length == 3) {
+            const auto second = static_cast<unsigned char>(input[i + 1]);
+            if ((first == 0xE0 && second < 0xA0) ||
+                (first == 0xED && second >= 0xA0)) valid = false;
+        }
+        if (valid && length == 4) {
+            const auto second = static_cast<unsigned char>(input[i + 1]);
+            if ((first == 0xF0 && second < 0x90) ||
+                (first == 0xF4 && second > 0x8F)) valid = false;
+        }
+        if (valid) {
+            output.append(input, i, length);
+            i += length;
+        } else {
+            output += replacement;
+            ++i;
+        }
+    }
+    return output;
+}
+
 }  // namespace
 
 bool DialogueModel::load(const std::string& path, std::string* error) {
@@ -263,7 +306,7 @@ std::string DialogueModel::decode(const std::vector<std::uint32_t>& ids) const {
         else if (id >= kPieceBase && id < vocab_size_)
             output += id_to_piece_[id];
     }
-    return output;
+    return sanitize_utf8(output);
 }
 
 bool DialogueModel::step(std::uint32_t token,
